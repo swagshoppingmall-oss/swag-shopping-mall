@@ -114,6 +114,27 @@ export default function CheckoutPage() {
       return;
     }
 
+    if (paymentMethod === "cod" && !demoMode) {
+      setBusy(true);
+      try {
+        const createOrder = httpsCallable<
+          { items: Array<{ productId: string; quantity: number }>; address: DeliveryAddress; couponCode?: string },
+          { orderId: string }
+        >(functions, "createCashOnDeliveryOrder");
+        const result = await createOrder({
+          items: lines.map(({ productId, quantity }) => ({ productId, quantity })),
+          address,
+          ...(couponCode.trim() ? { couponCode: couponCode.trim().toUpperCase() } : {}),
+        });
+        clearCart();
+        router.replace(`/orders?placed=${encodeURIComponent(result.data.orderId)}&cod=1`);
+      } catch (cause) {
+        setMessage(cause instanceof Error ? cause.message : "We couldn't place your cash-on-delivery order.");
+        setBusy(false);
+      }
+      return;
+    }
+
     const RazorpayCheckout = window.Razorpay;
     if (!scriptReady || !RazorpayCheckout) {
       setMessage("Payment checkout is still loading. Please try again in a moment.");
@@ -166,7 +187,9 @@ export default function CheckoutPage() {
         : <>Place demo order · {formatPrice(subtotal - discount)} <ArrowRight size={17} /></>
       : pendingVerification
         ? <>Retry order confirmation <ArrowRight size={17} /></>
-        : <>Continue to secure payment <ArrowRight size={17} /></>;
+        : paymentMethod === "cod"
+          ? <>Place order · pay on delivery <ArrowRight size={17} /></>
+          : <>Continue to secure payment <ArrowRight size={17} /></>;
 
   return <div className="shell page-shell checkout-page">
     <Link href="/cart" className="back-link"><ArrowLeft size={16} /> Back to your bag</Link>
@@ -183,12 +206,12 @@ export default function CheckoutPage() {
         ] as const).map(([field, label, placeholder, type]) => <label key={field} className={field === "line1" ? "field-wide" : ""}>{label}<input required value={address[field]} type={type} inputMode={field === "phone" || field === "pincode" ? "numeric" : undefined} pattern={field === "phone" ? "[0-9]{10}" : field === "pincode" ? "[0-9]{6}" : undefined} maxLength={field === "phone" ? 10 : field === "pincode" ? 6 : undefined} placeholder={placeholder} onChange={(event) => setAddress({ ...address, [field]: event.target.value })} /></label>)}</div>
       </section>
       <section className="checkout-section coupon-section"><div className="checkout-section-title"><span>02</span><div><h2>Have a little something extra?</h2><p>Apply a discount code</p></div></div><div className="coupon-input"><Tag size={17} /><input value={couponCode} onChange={(event) => { setCouponCode(event.target.value.toUpperCase()); setOfferApplied(false); setOfferMessage(""); }} placeholder="Enter discount code" /><button type="button" onClick={applyOffer}>{offerApplied ? "Applied ✓" : "Apply"}</button></div><p className={`coupon-hint ${offerApplied ? "offer-success" : offerMessage ? "offer-error" : ""}`}>{offerMessage || (demoMode ? "Try WELCOME10 for 10% off orders over ₹500 (up to ₹250 off)." : "Eligible offers are verified securely when you place your order.")}</p></section>
-      {demoMode && <section className="checkout-section demo-payment-section"><div className="checkout-section-title"><span>03</span><div><h2>Try a payment option</h2><p>No real charge—this is a safe demo checkout.</p></div></div><div className="demo-payment-options"><label className={paymentMethod === "upi" ? "selected" : ""}><input type="radio" name="payment-method" value="upi" checked={paymentMethod === "upi"} onChange={() => setPaymentMethod("upi")} /><Wallet size={17} /><span><strong>UPI / online</strong><small>Simulate a successful payment</small></span><Check size={15} /></label><label className={paymentMethod === "cod" ? "selected" : ""}><input type="radio" name="payment-method" value="cod" checked={paymentMethod === "cod"} onChange={() => setPaymentMethod("cod")} /><CreditCard size={17} /><span><strong>Cash on delivery</strong><small>Test the COD order flow</small></span><Check size={15} /></label><label className={paymentMethod === "fail" ? "selected" : ""}><input type="radio" name="payment-method" value="fail" checked={paymentMethod === "fail"} onChange={() => setPaymentMethod("fail")} /><LockKeyhole size={17} /><span><strong>Payment failure</strong><small>Test a declined payment</small></span><Check size={15} /></label></div></section>}
+      <section className="checkout-section demo-payment-section"><div className="checkout-section-title"><span>03</span><div><h2>{demoMode ? "Try a payment option" : "Payment method"}</h2><p>{demoMode ? "No real charge—this is a safe demo checkout." : "Choose how you’d like to pay."}</p></div></div><div className="demo-payment-options"><label className={paymentMethod === "upi" ? "selected" : ""}><input type="radio" name="payment-method" value="upi" checked={paymentMethod === "upi"} disabled={busy || Boolean(pendingVerification)} onChange={() => setPaymentMethod("upi")} /><Wallet size={17} /><span><strong>UPI / online</strong><small>{demoMode ? "Simulate a successful payment" : "Pay securely with Razorpay"}</small></span><Check size={15} /></label><label className={paymentMethod === "cod" ? "selected" : ""}><input type="radio" name="payment-method" value="cod" checked={paymentMethod === "cod"} disabled={busy || Boolean(pendingVerification)} onChange={() => setPaymentMethod("cod")} /><CreditCard size={17} /><span><strong>Cash on delivery</strong><small>{demoMode ? "Test the COD order flow" : "Pay in cash when your order arrives"}</small></span><Check size={15} /></label>{demoMode && <label className={paymentMethod === "fail" ? "selected" : ""}><input type="radio" name="payment-method" value="fail" checked={paymentMethod === "fail"} disabled={busy} onChange={() => setPaymentMethod("fail")} /><LockKeyhole size={17} /><span><strong>Payment failure</strong><small>Test a declined payment</small></span><Check size={15} /></label>}</div></section>
       {!user && <p className="form-error">Please <Link href="/login?next=/checkout">sign in</Link> before checkout.</p>}
       {message && <p className="form-error">{message}</p>}
-      <button className="button button-dark place-order-button" disabled={busy || (!demoMode && !scriptReady && !pendingVerification)}>{submitLabel}</button>
-      <p className="secure-note"><LockKeyhole size={14} /> {demoMode ? "Demo only · No money will be charged" : "Payments securely processed by Razorpay"}</p>
+      <button className="button button-dark place-order-button" disabled={busy || (!demoMode && paymentMethod !== "cod" && !scriptReady && !pendingVerification)}>{submitLabel}</button>
+      <p className="secure-note"><LockKeyhole size={14} /> {demoMode ? "Demo only · No money will be charged" : paymentMethod === "cod" ? "No payment is taken now · Pay when your order arrives" : "Payments securely processed by Razorpay"}</p>
     </form>
-    <aside className="order-summary checkout-summary"><h2>A little recap</h2><div className="checkout-items">{lines.map(({ product, quantity }) => <div className="checkout-item" key={product!.id}><img src={product!.image} alt="" /><span><strong>{product!.name}</strong><small>Qty {quantity} · {product!.unit}</small></span><b>{formatPrice(product!.price * quantity)}</b></div>)}</div><div className="summary-row"><span>Subtotal</span><strong>{formatPrice(subtotal)}</strong></div>{discount > 0 && <div className="summary-row demo-discount"><span>WELCOME10 · 10% off</span><strong>−{formatPrice(discount)}</strong></div>}<div className="summary-row"><span>Delivery</span><strong>{subtotal >= 99900 ? "On us" : "At checkout"}</strong></div><div className="summary-row summary-total"><span>{demoMode ? "Demo total" : "Total before offer"}</span><strong>{formatPrice(subtotal - discount)}</strong></div><p className="summary-note">{demoMode ? "Preview order only. No payment will be processed." : "Any valid discount will be applied securely before payment."}</p><div className="delivery-estimate"><Truck size={18} /><span><strong>Thoughtful things, on their way</strong><small>Usually delivered in 3–5 business days</small></span></div></aside></div>
+    <aside className="order-summary checkout-summary"><h2>A little recap</h2><div className="checkout-items">{lines.map(({ product, quantity }) => <div className="checkout-item" key={product!.id}><img src={product!.image} alt="" /><span><strong>{product!.name}</strong><small>Qty {quantity} · {product!.unit}</small></span><b>{formatPrice(product!.price * quantity)}</b></div>)}</div><div className="summary-row"><span>Subtotal</span><strong>{formatPrice(subtotal)}</strong></div>{discount > 0 && <div className="summary-row demo-discount"><span>WELCOME10 · 10% off</span><strong>−{formatPrice(discount)}</strong></div>}<div className="summary-row"><span>Delivery</span><strong>{subtotal >= 99900 ? "On us" : "At checkout"}</strong></div><div className="summary-row summary-total"><span>{demoMode ? "Demo total" : paymentMethod === "cod" ? "Order total" : "Total before offer"}</span><strong>{formatPrice(subtotal - discount)}</strong></div><p className="summary-note">{demoMode ? "Preview order only. No payment will be processed." : paymentMethod === "cod" ? "Pay the order total in cash when it's delivered." : "Any valid discount will be applied securely before payment."}</p><div className="delivery-estimate"><Truck size={18} /><span><strong>Thoughtful things, on their way</strong><small>Usually delivered in 3–5 business days</small></span></div></aside></div>
   </div>;
 }

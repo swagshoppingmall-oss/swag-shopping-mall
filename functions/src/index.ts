@@ -57,6 +57,24 @@ async function getPricedItems(lines: CartLine[]) {
   return products;
 }
 
+async function getDiscount(couponCode: unknown, subtotal: number) {
+  if (typeof couponCode !== "string" || !couponCode.trim()) return 0;
+  const normalizedCode = couponCode.trim().toUpperCase();
+  if (!/^[A-Z0-9_-]{1,40}$/.test(normalizedCode)) {
+    throw new HttpsError("invalid-argument", "Discount code format is invalid.");
+  }
+  const couponSnap = await db.collection("coupons").doc(normalizedCode).get();
+  const coupon = couponSnap.data();
+  if (!couponSnap.exists || coupon?.active !== true ||
+    (coupon.expiresAt && coupon.expiresAt.toMillis() < Date.now()) ||
+    (coupon.minOrder && subtotal < coupon.minOrder)) {
+    throw new HttpsError("failed-precondition", "This discount code is invalid or expired.");
+  }
+  return coupon.type === "percent"
+    ? Math.min(Math.floor(subtotal * coupon.value / 100), coupon.maxDiscount ?? subtotal)
+    : Math.min(coupon.value, subtotal);
+}
+
 export const createRazorpayOrder = onCall(
   { secrets: [razorpayKeyId, razorpayKeySecret], maxInstances: 10 },
   async (request) => {
@@ -67,23 +85,7 @@ export const createRazorpayOrder = onCall(
 
     const items = await getPricedItems(data.items);
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    let discount = 0;
-    if (typeof data.couponCode === "string" && data.couponCode.trim()) {
-      const normalizedCode = data.couponCode.trim().toUpperCase();
-      if (!/^[A-Z0-9_-]{1,40}$/.test(normalizedCode)) {
-        throw new HttpsError("invalid-argument", "Discount code format is invalid.");
-      }
-      const couponSnap = await db.collection("coupons").doc(normalizedCode).get();
-      const coupon = couponSnap.data();
-      if (!couponSnap.exists || coupon?.active !== true ||
-        (coupon.expiresAt && coupon.expiresAt.toMillis() < Date.now()) ||
-        (coupon.minOrder && subtotal < coupon.minOrder)) {
-        throw new HttpsError("failed-precondition", "This discount code is invalid or expired.");
-      }
-      discount = coupon.type === "percent"
-        ? Math.min(Math.floor(subtotal * coupon.value / 100), coupon.maxDiscount ?? subtotal)
-        : Math.min(coupon.value, subtotal);
-    }
+    const discount = await getDiscount(data.couponCode, subtotal);
 
     const total = Math.max(0, subtotal - discount);
     if (total < 1) throw new HttpsError("failed-precondition", "Order total must be at least ₹1.");
@@ -105,6 +107,52 @@ export const createRazorpayOrder = onCall(
     return { orderId: paymentOrder.id, amount: total, currency: "INR", keyId: razorpayKeyId.value() };
   },
 );
+
+export const createCashOnDeliveryOrder = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before checkout.");
+  const data = request.data as { items?: unknown; address?: unknown; couponCode?: unknown };
+  assertLines(data?.items);
+  assertAddress(data.address);
+
+  const items = await getPricedItems(data.items);
+  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const discount = await getDiscount(data.couponCode, subtotal);
+  const total = Math.max(0, subtotal - discount);
+  if (total < 1) throw new HttpsError("failed-precondition", "Order total must be at least ₹1.");
+
+  const orderRef = db.collection("orders").doc();
+  await db.runTransaction(async (transaction) => {
+    const productRefs = items.map((item) => db.collection("products").doc(item.productId));
+    const productSnaps = await Promise.all(productRefs.map((ref) => transaction.get(ref)));
+    productSnaps.forEach((snap, index) => {
+      const product = snap.data();
+      const item = items[index];
+      if (!snap.exists || !product || product.active === false || !Number.isInteger(product.stock) ||
+        product.stock < item.quantity || product.price !== item.price) {
+        throw new HttpsError("failed-precondition", `${item.name} is no longer available at the requested price and quantity.`);
+      }
+    });
+
+    transaction.create(orderRef, {
+      userId: request.auth!.uid,
+      customerEmail: typeof request.auth!.token.email === "string" ? request.auth!.token.email : null,
+      items,
+      address: data.address,
+      subtotal,
+      discount,
+      total,
+      couponCode: typeof data.couponCode === "string" ? data.couponCode.trim().toUpperCase() || null : null,
+      status: "confirmed",
+      payment: { provider: "cod", method: "cod", status: "due" },
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    productSnaps.forEach((snap, index) => {
+      transaction.update(productRefs[index], { stock: snap.data()!.stock - items[index].quantity });
+    });
+  });
+  return { orderId: orderRef.id };
+});
 
 export const verifyRazorpayPayment = onCall(
   { secrets: [razorpayKeyId, razorpayKeySecret], maxInstances: 10 },

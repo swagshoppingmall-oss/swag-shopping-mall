@@ -1,6 +1,6 @@
 # Swag Shopping Mall
 
-A responsive wholesale-to-customer storefront for Swag Shopping Mall, built with Next.js, Firebase Authentication/Firestore/Cloud Functions, and Razorpay. Product prices, order totals, coupons, stock checks, and payment verification are handled on trusted server code; the browser never receives the Razorpay secret.
+A responsive wholesale-to-customer storefront for Swag Shopping Mall, built with Next.js, Firebase Authentication/Firestore/Cloud Functions, and Razorpay. Product prices, order totals, coupons, stock checks, and payment verification are handled on trusted server code; the browser never receives the Razorpay secret. Checkout supports Razorpay online payments and cash on delivery.
 
 ## Stack
 
@@ -83,7 +83,7 @@ A responsive wholesale-to-customer storefront for Swag Shopping Mall, built with
 
 - Search and category filtering, product detail pages, availability, cart and quantity controls, persistent wishlist
 - Firebase email/password and Google authentication, customer orders and order status tracking
-- Razorpay order creation with server-calculated item pricing and discount, HMAC signature verification, transaction records, and transactional inventory decrement
+- Razorpay online payments and cash-on-delivery orders with server-calculated item pricing and discounts, stock validation, and transactional inventory decrement
 - Safe payment recovery: a captured payment with a transient verification failure can be re-verified from checkout without creating a second charge
 - Admin custom-claim authorization, catalog CRUD, order status management, sales totals, order average, low-stock count, and top-selling products
 - In-app order confirmations/status updates through Firestore snapshots
@@ -92,6 +92,6 @@ A responsive wholesale-to-customer storefront for Swag Shopping Mall, built with
 
 - Deploy rules, indexes, and Functions with `firebase deploy --only firestore:rules,firestore:indexes,functions`. Deploy the Next.js app to Vercel (or another Node-compatible host) with the `NEXT_PUBLIC_*` Firebase configuration. Do not commit `.env.local` or service-account keys.
 - Only a trusted Admin SDK can set the `admin` custom claim. The client-side `users/{uid}.role` profile value is descriptive and does not grant permissions. The local demo administrator does not grant Firebase permissions.
-- Firestore denies all client order/transaction writes. The Functions validate the signed-in user, server-read prices/stock/coupon details, verify Razorpay's HMAC signature, and atomically write the paid order and decrement stock.
+- Firestore denies all client order/transaction writes. The Functions validate the signed-in user, server-read prices/stock/coupon details, verify Razorpay's HMAC signature, and atomically write paid or cash-on-delivery orders and decrement stock.
 - A Razorpay payment that succeeds but cannot be verified from the browser remains recoverable: check Razorpay's payment dashboard and the associated `checkoutDrafts/{razorpayOrderId}` record before asking a customer to retry. Do not manually change order or transaction documents from an untrusted client.
 - Production readiness still requires business-specific shipping/tax rules, customer support/contact details, email/SMS notification delivery, privacy/terms pages, refund operations, monitoring, and deployment-secret configuration.
