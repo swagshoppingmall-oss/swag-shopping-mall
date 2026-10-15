@@ -1,0 +1,33 @@
+{
+  "name": "swag-shopping-mall",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "tsc --noEmit",
+    "seed": "tsx scripts/seed-products.ts",
+    "seed:users": "tsx scripts/seed-users.ts",
+    "emulate": "firebase emulators:start",
+    "deploy:firebase": "firebase deploy --only firestore:rules,firestore:indexes,functions"
+  },
+  "dependencies": {
+    "firebase": "^13.0.0",
+    "lucide-react": "^0.468.0",
+    "next": "^16.4.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "firebase-admin": "^14.5.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.6"
+  }
+}
