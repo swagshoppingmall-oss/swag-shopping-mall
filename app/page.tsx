@@ -7,7 +7,7 @@ import { useStore } from "@/components/store-provider";
 import { firebaseConfigured } from "@/lib/firebase";
 
 export default function HomePage() {
-  const { products, loading, category, search, setCategory } = useStore();
+  const { products, categories, loading, category, search, setCategory } = useStore();
   const normalized = search.trim().toLowerCase();
   const filtered = products.filter((product) =>
     (category === "All" || product.category === category) &&
@@ -43,7 +43,7 @@ export default function HomePage() {
     <section className="shop-section shell" id="shop">
       <div className="section-heading"><div><span className="eyebrow">The Swag Shopping Mall edit</span><h2>{search ? `Results for “${search}”` : category === "All" ? "Little things, big difference." : category}</h2><p>Considered essentials at prices that just make sense.</p></div><Link href="/products" className="text-link">Browse all products <ArrowRight size={15} /></Link></div>
       {!firebaseConfigured && <div className="demo-catalog-note"><span>✦</span><p><strong>You're browsing the Swag Shopping Mall sample shop.</strong> Products are for preview—connect Firebase to use live inventory and checkout.</p></div>}
-      <div className="quick-categories">{["All", "Grocery", "Home & Living", "Kitchen"].map((item) => <button key={item} className={`category-chip ${category === item ? "active" : ""}`} onClick={() => setCategory(item)}>{item === "All" ? "Everything" : item}</button>)}</div>
+      <div className="quick-categories">{["All", ...categories].map((item) => <button key={item} className={`category-chip ${category === item ? "active" : ""}`} onClick={() => setCategory(item)}>{item === "All" ? "Everything" : item}</button>)}</div>
       {loading ? <div className="loading-state"><span className="spinner" />Gathering the good stuff...</div>
         : filtered.length ? <div className="product-grid">{(featured.length && !search && category === "All" ? [...featured, ...filtered.filter((item) => !featured.includes(item))] : filtered).slice(0, 4).map((product) => <ProductCard key={product.id} product={product} />)}</div>
           : <div className="empty-state"><span className="empty-icon">⌕</span><h3>Nothing on this shelf just yet.</h3><p>{products.length ? "Try another search or browse all of our finds." : "Connect Firebase and seed the catalog to get the shop started."}</p><button className="button button-outline" onClick={() => setCategory("All")}>Browse everything</button></div>}

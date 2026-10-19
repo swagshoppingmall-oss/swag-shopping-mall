@@ -5,10 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { Heart, Home, LogOut, Search, ShoppingBag, Store, UserRound } from "lucide-react";
 import { useStore } from "@/components/store-provider";
 
-const categories = ["All", "Grocery", "Home & Living", "Kitchen"];
-
 export function Header() {
-  const { cart, category, setCategory, search, setSearch, user, isAdmin, signOutUser } = useStore();
+  const { cart, category, categories, setCategory, search, setSearch, user, isAdmin, signOutUser } = useStore();
   const router = useRouter();
   const pathname = usePathname();
   const cartCount = Object.values(cart).reduce((sum, value) => sum + value, 0);
@@ -40,7 +38,7 @@ export function Header() {
           </nav>
         </div>
         <div className="category-bar"><div className="shell category-inner">
-          {categories.map((item) => <button key={item} className={`category-link ${category === item ? "selected" : ""}`} onClick={() => selectCategory(item)}>{item === "All" ? "Shop all" : item}</button>)}
+          {["All", ...categories].map((item) => <button key={item} className={`category-link ${category === item ? "selected" : ""}`} onClick={() => selectCategory(item)}>{item === "All" ? "Shop all" : item}</button>)}
           <Link href="/orders" className="category-link orders-link">My orders</Link>
           {isAdmin && <Link href="/admin" className="category-link admin-link">Admin studio</Link>}
           <span className="bulk-note">A little more, a lot less.</span>

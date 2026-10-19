@@ -5,7 +5,7 @@ import {
   type ReactNode,
 } from "react";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, where, writeBatch } from "firebase/firestore";
 import { auth, db, firebaseConfigured } from "@/lib/firebase";
 import { ADMIN_EMAIL } from "@/lib/admin";
 import { DEMO_PRODUCTS } from "@/lib/demo-products";
@@ -13,9 +13,15 @@ import { DEMO_ADMIN, DEMO_CUSTOMER, DEMO_LOGIN_ENABLED } from "@/lib/demo-auth";
 import type { Product, StoreOrder } from "@/lib/types";
 
 type StoreUser = Pick<User, "uid" | "email" | "displayName"> & { isDemo?: boolean };
+const DEFAULT_CATEGORIES = ["Grocery", "Home & Living", "Kitchen"];
 
 type StoreContextValue = {
   products: Product[];
+  categories: string[];
+  saveCategory: (name: string, previousName?: string) => Promise<void>;
+  deleteCategory: (name: string) => Promise<void>;
+  cashOnDeliveryEnabled: boolean;
+  setCashOnDeliveryEnabled: (enabled: boolean) => Promise<void>;
   user: StoreUser | null;
   isAdmin: boolean;
   demoLoginEnabled: boolean;
@@ -46,6 +52,8 @@ const demoLoginEnabled = DEMO_LOGIN_ENABLED && !firebaseConfigured;
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>(DEMO_PRODUCTS);
+  const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [cashOnDeliveryEnabled, setCashOnDeliveryEnabledState] = useState(false);
   const [user, setUser] = useState<StoreUser | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [cart, setCart] = useState<Record<string, number>>({});
@@ -77,6 +85,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setIsAdmin(true);
       }
       if (demoLoginEnabled) {
+        setCashOnDeliveryEnabledState(localStorage.getItem("bazaar-cod-enabled") === "true");
+        const savedCategories = localStorage.getItem("bazaar-demo-categories");
+        if (savedCategories) {
+          const parsedCategories: unknown = JSON.parse(savedCategories);
+          if (Array.isArray(parsedCategories) && parsedCategories.every((item) => typeof item === "string")) {
+            setCategories(parsedCategories);
+          }
+        }
         const savedProducts = localStorage.getItem("bazaar-demo-products");
         if (savedProducts) setProducts(JSON.parse(savedProducts) as Product[]);
         const savedOrders = localStorage.getItem("bazaar-demo-orders");
@@ -95,6 +111,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } finally {
       setPreferencesLoaded(true);
     }
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseConfigured) return;
+    return onSnapshot(doc(db, "storeSettings", "catalog"), (snapshot) => {
+      const savedCategories: unknown = snapshot.data()?.categories;
+      setCategories(Array.isArray(savedCategories) && savedCategories.every((item) => typeof item === "string")
+        ? savedCategories
+        : DEFAULT_CATEGORIES);
+    }, (error) => {
+      console.error("Unable to load store categories.", error);
+      setCategories(DEFAULT_CATEGORIES);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseConfigured) return;
+    return onSnapshot(doc(db, "storeSettings", "payments"), (snapshot) => {
+      setCashOnDeliveryEnabledState(snapshot.data()?.cashOnDeliveryEnabled === true);
+    }, (error) => {
+      console.error("Unable to load store payment settings.", error);
+      setCashOnDeliveryEnabledState(false);
+    });
   }, []);
 
   useEffect(() => {
@@ -212,9 +251,94 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       : [...previous, id]);
   }, []);
   const clearCart = useCallback(() => setCart({}), []);
+  const updateCashOnDeliveryEnabled = useCallback(async (enabled: boolean) => {
+    if (!isAdmin) throw new Error("Administrator access is required to update payment settings.");
+    if (user?.isDemo && demoLoginEnabled) {
+      localStorage.setItem("bazaar-cod-enabled", String(enabled));
+      setCashOnDeliveryEnabledState(enabled);
+      return;
+    }
+    if (!firebaseConfigured) throw new Error("Connect Firebase before updating payment settings.");
+    await setDoc(doc(db, "storeSettings", "payments"), {
+      cashOnDeliveryEnabled: enabled,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    setCashOnDeliveryEnabledState(enabled);
+  }, [demoLoginEnabled, isAdmin, user]);
+  const saveCategory = useCallback(async (name: string, previousName?: string) => {
+    if (!isAdmin) throw new Error("Administrator access is required to manage categories.");
+    const normalizedName = name.trim();
+    if (!normalizedName) throw new Error("Enter a category name.");
+    if (normalizedName.length > 40) throw new Error("Category names must be 40 characters or fewer.");
+    if (categories.some((category) =>
+      category.toLocaleLowerCase() === normalizedName.toLocaleLowerCase() &&
+      category !== previousName)) {
+      throw new Error("A category with this name already exists.");
+    }
+    if (previousName && !categories.includes(previousName)) throw new Error("The category no longer exists.");
+    const nextCategories = previousName
+      ? categories.map((category) => category === previousName ? normalizedName : category)
+      : [...categories, normalizedName];
+    if (user?.isDemo && demoLoginEnabled) {
+      if (previousName) {
+        setProducts((current) => current.map((product) =>
+          product.category === previousName ? { ...product, category: normalizedName } : product));
+      }
+      localStorage.setItem("bazaar-demo-categories", JSON.stringify(nextCategories));
+      setCategories(nextCategories);
+      if (category === previousName) setCategory(normalizedName);
+      return;
+    }
+    if (!firebaseConfigured) throw new Error("Connect Firebase before managing categories.");
+    if (previousName) {
+      const matchingProducts = await getDocs(query(collection(db, "products"), where("category", "==", previousName)));
+      for (let offset = 0; offset < matchingProducts.docs.length; offset += 450) {
+        const batch = writeBatch(db);
+        matchingProducts.docs.slice(offset, offset + 450).forEach((product) => {
+          batch.update(product.ref, { category: normalizedName, updatedAt: serverTimestamp() });
+        });
+        await batch.commit();
+      }
+    }
+    await setDoc(doc(db, "storeSettings", "catalog"), {
+      categories: nextCategories,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    setCategories(nextCategories);
+    if (category === previousName) setCategory(normalizedName);
+  }, [categories, category, demoLoginEnabled, isAdmin, user]);
+  const deleteCategory = useCallback(async (name: string) => {
+    if (!isAdmin) throw new Error("Administrator access is required to manage categories.");
+    const nextCategories = categories.filter((category) => category !== name);
+    if (nextCategories.length === categories.length) throw new Error("The category no longer exists.");
+    if (!nextCategories.length) throw new Error("At least one category must remain.");
+    if (user?.isDemo && demoLoginEnabled) {
+      if (products.some((product) => product.category === name)) {
+        throw new Error("Move or reassign this category's products before deleting it.");
+      }
+      localStorage.setItem("bazaar-demo-categories", JSON.stringify(nextCategories));
+      setCategories(nextCategories);
+      if (category === name) setCategory("All");
+      return;
+    }
+    if (!firebaseConfigured) throw new Error("Connect Firebase before managing categories.");
+    const matchingProducts = await getDocs(query(collection(db, "products"), where("category", "==", name)));
+    if (!matchingProducts.empty) {
+      throw new Error("Move or reassign this category's products before deleting it.");
+    }
+    await setDoc(doc(db, "storeSettings", "catalog"), {
+      categories: nextCategories,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    setCategories(nextCategories);
+    if (category === name) setCategory("All");
+  }, [categories, category, demoLoginEnabled, isAdmin, products, user]);
   const placeDemoOrder = useCallback((address: StoreOrder["address"], couponCode: string, paymentMethod: string) => {
     if (!demoLoginEnabled || !user?.isDemo) throw new Error("Sign in with the local demo customer to place a preview order.");
     if (!Object.keys(cart).length) throw new Error("Your bag is empty.");
+    if (paymentMethod === "cod" && !cashOnDeliveryEnabled) {
+      throw new Error("Cash on delivery is currently unavailable.");
+    }
 
     const items = Object.entries(cart).map(([productId, quantity]) => {
       const product = products.find((item) => item.id === productId);
@@ -255,7 +379,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
     setCart({});
     return order;
-  }, [cart, products, user]);
+  }, [cart, cashOnDeliveryEnabled, products, user]);
   const advanceDemoOrder = useCallback((orderId: string) => {
     if (!demoLoginEnabled || !user?.isDemo) return;
     const stages = ["confirmed", "processing", "shipped", "delivered"];
@@ -335,12 +459,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setOrders((previous) => previous.map((order) => order.id === orderId ? { ...order, status } : order));
   }, [demoLoginEnabled, isAdmin, orders, user]);
   const value = useMemo(() => ({
-    products, user, isAdmin, demoLoginEnabled, signInDemo, signOutUser,
+    products, categories, saveCategory, deleteCategory,
+    cashOnDeliveryEnabled, setCashOnDeliveryEnabled: updateCashOnDeliveryEnabled,
+    user, isAdmin, demoLoginEnabled, signInDemo, signOutUser,
     saveDemoProduct, deleteDemoProduct, setDemoOrderStatus,
     cart, favorites, orders, loading, search, setSearch,
     category, setCategory, addToCart, setQuantity, removeFromCart, toggleFavorite, clearCart,
     placeDemoOrder, advanceDemoOrder,
   }), [products, user, isAdmin, cart, favorites, orders, loading, search, category,
+    categories, saveCategory, deleteCategory, cashOnDeliveryEnabled, updateCashOnDeliveryEnabled,
     demoLoginEnabled, signInDemo, signOutUser, saveDemoProduct, deleteDemoProduct, setDemoOrderStatus,
     addToCart, setQuantity, removeFromCart, toggleFavorite, clearCart,
     placeDemoOrder, advanceDemoOrder]);

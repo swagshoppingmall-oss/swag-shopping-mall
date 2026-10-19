@@ -122,6 +122,11 @@ export const createCashOnDeliveryOrder = onCall(async (request) => {
 
   const orderRef = db.collection("orders").doc();
   await db.runTransaction(async (transaction) => {
+    const settingsRef = db.collection("storeSettings").doc("payments");
+    const settingsSnap = await transaction.get(settingsRef);
+    if (settingsSnap.data()?.cashOnDeliveryEnabled !== true) {
+      throw new HttpsError("failed-precondition", "Cash on delivery is currently unavailable.");
+    }
     const productRefs = items.map((item) => db.collection("products").doc(item.productId));
     const productSnaps = await Promise.all(productRefs.map((ref) => transaction.get(ref)));
     productSnaps.forEach((snap, index) => {

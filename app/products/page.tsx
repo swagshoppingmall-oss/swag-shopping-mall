@@ -11,17 +11,14 @@ import { formatPrice } from "@/lib/utils";
 type SortOrder = "featured" | "price-low" | "price-high" | "rating" | "name";
 
 export default function ProductsPage() {
-  const { products, loading, category, setCategory, search } = useStore();
+  const { products, categories: storeCategories, loading, category, setCategory, search } = useStore();
   const [sort, setSort] = useState<SortOrder>("featured");
   const [inStockOnly, setInStockOnly] = useState(false);
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
 
   const highestPrice = Math.max(0, ...products.map((product) => product.price));
   const priceLimit = maxPrice === null ? highestPrice : Math.min(maxPrice, highestPrice);
-  const categories = useMemo(
-    () => ["All", ...new Set(products.map((product) => product.category).filter(Boolean).sort())],
-    [products],
-  );
+  const categories = useMemo(() => ["All", ...storeCategories], [storeCategories]);
   const normalizedSearch = search.trim().toLocaleLowerCase();
   const visibleProducts = useMemo(() => {
     const filtered = products.filter((product) => {

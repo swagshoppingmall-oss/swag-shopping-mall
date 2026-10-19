@@ -85,7 +85,7 @@ A responsive wholesale-to-customer storefront for Swag Shopping Mall, built with
 - Firebase email/password and Google authentication, customer orders and order status tracking
 - Razorpay online payments and cash-on-delivery orders with server-calculated item pricing and discounts, stock validation, and transactional inventory decrement
 - Safe payment recovery: a captured payment with a transient verification failure can be re-verified from checkout without creating a second charge
-- Admin custom-claim authorization, catalog CRUD, order status management, sales totals, order average, low-stock count, and top-selling products
+- Admin custom-claim authorization, catalog and category management, order status management, sales totals, order average, low-stock count, and top-selling products
 - In-app order confirmations/status updates through Firestore snapshots
 
 ## Security and deployment notes

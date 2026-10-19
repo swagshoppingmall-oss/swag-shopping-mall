@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { addDoc, collection, deleteDoc, doc, getDoc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { BarChart3, Boxes, Eye, Mail, MapPin, PackageCheck, Pencil, Phone, Plus, ShoppingBag, Trash2, UserRound, X } from "lucide-react";
+import { BarChart3, Boxes, Eye, Mail, MapPin, PackageCheck, Pencil, Phone, Plus, Settings, ShoppingBag, Tags, Trash2, UserRound, X } from "lucide-react";
 import { useStore } from "@/components/store-provider";
 import { auth, db, firebaseConfigured, functions } from "@/lib/firebase";
 import type { Product, StoreOrder } from "@/lib/types";
@@ -15,17 +15,22 @@ type ProductForm = typeof blankProduct;
 
 export default function AdminPage() {
   const {
-    user, isAdmin, products, orders: demoOrders, demoLoginEnabled,
+    user, isAdmin, products, categories, saveCategory, deleteCategory, orders: demoOrders, demoLoginEnabled,
+    cashOnDeliveryEnabled, setCashOnDeliveryEnabled,
     saveDemoProduct, deleteDemoProduct, setDemoOrderStatus,
   } = useStore();
   const [liveOrders, setLiveOrders] = useState<StoreOrder[]>([]);
   const orders = demoLoginEnabled && user?.isDemo ? demoOrders : liveOrders;
-  const [activeTab, setActiveTab] = useState<"overview" | "products" | "orders">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "products" | "orders" | "settings" | "categories">("overview");
   const [editing, setEditing] = useState<Product | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<StoreOrder | null>(null);
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [categoryName, setCategoryName] = useState("");
+  const [editingCategory, setEditingCategory] = useState<string | null>(null);
+  const [categoryBusy, setCategoryBusy] = useState(false);
 
   useEffect(() => {
     if (!isAdmin || !firebaseConfigured || user?.isDemo) return;
@@ -114,18 +119,64 @@ export default function AdminPage() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Order status could not be updated."); }
   }
 
+  async function updateCashOnDelivery(enabled: boolean) {
+    setError("");
+    setSettingsBusy(true);
+    try {
+      await setCashOnDeliveryEnabled(enabled);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Payment settings could not be updated.");
+    } finally {
+      setSettingsBusy(false);
+    }
+  }
+
+  async function submitCategory(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setCategoryBusy(true);
+    try {
+      await saveCategory(categoryName, editingCategory ?? undefined);
+      setCategoryName("");
+      setEditingCategory(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Category could not be saved.");
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
+
+  async function removeCategory(name: string) {
+    if (!window.confirm(`Delete the “${name}” category?`)) return;
+    setError("");
+    setCategoryBusy(true);
+    try {
+      await deleteCategory(name);
+      if (editingCategory === name) {
+        setEditingCategory(null);
+        setCategoryName("");
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Category could not be deleted.");
+    } finally {
+      setCategoryBusy(false);
+    }
+  }
+
   if (!user || !isAdmin) return <div className="shell page-shell"><div className="empty-state"><span className="admin-lock">✳</span><h2>Admin studio.</h2><p>{!user ? "Sign in with an administrator account to manage Swag Shopping Mall." : "This account doesn't have administrator access."}</p><Link href={!user ? "/login" : "/"} className="button button-dark">{!user ? "Sign in" : "Back to shop"}</Link></div></div>;
-  return <div className="admin-shell"><aside className="admin-sidebar"><Link href="/" className="brand"><span className="brand-mark">S</span><span>Swag Shopping Mall</span></Link><span className="admin-eyebrow">ADMIN STUDIO</span>{(["overview", "products", "orders"] as const).map((tab) => <button key={tab} className={`admin-nav ${activeTab === tab ? "active" : ""}`} onClick={() => setActiveTab(tab)}>{tab === "overview" ? <BarChart3 size={18} /> : tab === "products" ? <Boxes size={18} /> : <ShoppingBag size={18} />}{tab[0].toUpperCase() + tab.slice(1)}</button>)}<Link href="/" className="admin-back">← Back to storefront</Link></aside>
-    <main className="admin-main"><div className="admin-topbar"><div><span className="eyebrow">YOUR SWAG SHOPPING MALL, AT A GLANCE</span><h1>{activeTab === "overview" ? "A good day to grow." : activeTab === "products" ? "Your shelves." : "The journey home."}</h1></div><span className="admin-user"><span className="admin-avatar">{(user.displayName ?? user.email ?? "A")[0].toUpperCase()}</span>{user.displayName ?? user.email}</span></div>
+  return <div className="admin-shell"><aside className="admin-sidebar"><Link href="/" className="brand"><span className="brand-mark">S</span><span>Swag Shopping Mall</span></Link><span className="admin-eyebrow">ADMIN STUDIO</span>{(["overview", "products", "categories", "orders", "settings"] as const).map((tab) => <button key={tab} className={`admin-nav ${activeTab === tab ? "active" : ""}`} onClick={() => setActiveTab(tab)}>{tab === "overview" ? <BarChart3 size={18} /> : tab === "products" ? <Boxes size={18} /> : tab === "orders" ? <ShoppingBag size={18} /> : tab === "categories" ? <Tags size={18} /> : <Settings size={18} />}{tab[0].toUpperCase() + tab.slice(1)}</button>)}<Link href="/" className="admin-back">← Back to storefront</Link></aside>
+    <main className="admin-main"><div className="admin-topbar"><div><span className="eyebrow">YOUR SWAG SHOPPING MALL, AT A GLANCE</span><h1>{activeTab === "overview" ? "A good day to grow." : activeTab === "products" ? "Your shelves." : activeTab === "orders" ? "The journey home." : activeTab === "categories" ? "Your collections." : "Store settings."}</h1></div><span className="admin-user"><span className="admin-avatar">{(user.displayName ?? user.email ?? "A")[0].toUpperCase()}</span>{user.displayName ?? user.email}</span></div>
       {demoLoginEnabled && user.isDemo && <div className="demo-catalog-note"><span>✦</span><p><strong>Demo admin workspace.</strong> Changes to products and order statuses are saved only in this browser.</p></div>}
       {error && <p className="form-error admin-error">{error}</p>}
       {activeTab === "overview" && <><div className="metric-grid"><Metric icon={<BarChart3 />} label="Total revenue" value={formatPrice(metrics.revenue)} note="From confirmed orders" /><Metric icon={<ShoppingBag />} label="Orders placed" value={String(metrics.orderCount)} note={`${orders.filter((order) => ["confirmed", "processing"].includes(order.status)).length} need attention`} /><Metric icon={<PackageCheck />} label="Items listed" value={String(products.length)} note={`${products.filter((product) => product.stock < 10).length} running low`} /><Metric icon={<BarChart3 />} label="Sales · last 7 days" value={formatPrice(metrics.weeklyRevenue)} note="Rolling seven-day revenue" /></div>
         <div className="admin-panels"><section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">ON THE MOVE</span><h2>Recent orders</h2></div><button onClick={() => setActiveTab("orders")} className="text-link">See all →</button></div>{orders.slice(0, 5).length ? orders.slice(0, 5).map((order) => <div className="recent-order" key={order.id}><span className="recent-order-icon"><ShoppingBag size={16} /></span><span><strong>{order.address?.name ?? "Customer"}</strong><small>#{order.id.slice(-8).toUpperCase()} · {order.items.length} items</small></span><b>{formatPrice(order.total)}</b><span className={`order-status status-${order.status}`}>{order.status}</span></div>) : <p className="admin-empty">Your first order is just around the corner.</p>}</section><section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">CUSTOMER FAVOURITES</span><h2>Top-selling products</h2></div></div>{metrics.topProducts.length ? metrics.topProducts.map((item, index) => <div className="top-product" key={item.name}><span className="top-rank">0{index + 1}</span><strong>{item.name}</strong><span>{item.quantity} sold</span></div>) : <p className="admin-empty">The bestsellers will show up after your first sale.</p>}</section></div>
         <section className="admin-panel sales-panel"><div className="panel-heading"><div><span className="eyebrow">A WEEK IN THE MAKING</span><h2>Revenue, day by day</h2></div><strong>{formatPrice(metrics.weeklyRevenue)}</strong></div><div className="sales-chart">{metrics.weeklySales.map((day) => { const peak = Math.max(...metrics.weeklySales.map((item) => item.revenue), 1); return <div className="sales-day" key={day.key}><span>{day.revenue ? formatPrice(day.revenue) : "—"}</span><div className="sales-bar-track"><i style={{ height: `${Math.max(day.revenue ? day.revenue / peak * 100 : 0, 3)}%` }} /></div><small>{day.date.toLocaleDateString("en-IN", { weekday: "short" })}</small></div>; })}</div></section></>}
       {activeTab === "products" && <section className="admin-panel admin-table-panel"><div className="panel-heading"><div><span className="eyebrow">THE GOOD STUFF</span><h2>{products.length} products on the shelf</h2></div><button className="button button-dark admin-add" onClick={() => { setEditing(null); setAdding(true); }}><Plus size={16} /> Add product</button></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead><tbody>{products.map((product) => <tr key={product.id}><td><span className="table-product"><img src={product.image} alt="" /><span><strong>{product.name}</strong><small>{product.unit}</small></span></span></td><td>{product.category}</td><td>{formatPrice(product.price)}</td><td><span className={product.stock < 10 ? "low-stock" : ""}>{product.stock} units</span></td><td><span className="table-actions"><button onClick={() => { setEditing(product); setAdding(true); }} aria-label={`Edit ${product.name}`}><Pencil size={16} /></button><button onClick={() => deleteProduct(product)} aria-label={`Delete ${product.name}`}><Trash2 size={16} /></button></span></td></tr>)}</tbody></table></div></section>}
+      {activeTab === "categories" && <section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">ORGANIZE THE SHOP</span><h2>Product categories</h2></div></div><form className="category-admin-form" onSubmit={submitCategory}><label>{editingCategory ? "Update category name" : "New category"}<input value={categoryName} maxLength={40} required placeholder="e.g. Personal Care" onChange={(event) => setCategoryName(event.target.value)} /></label><button className="button button-dark" disabled={categoryBusy || !categoryName.trim()}>{categoryBusy ? "Saving..." : editingCategory ? "Save changes" : <><Plus size={15} /> Add category</>}</button>{editingCategory && <button type="button" className="button button-outline" disabled={categoryBusy} onClick={() => { setEditingCategory(null); setCategoryName(""); }}>Cancel</button>}</form><div className="category-admin-list">{categories.map((name) => <div className="category-admin-row" key={name}><span><strong>{name}</strong><small>{products.filter((product) => product.category === name).length} products</small></span><span className="table-actions"><button disabled={categoryBusy} aria-label={`Edit ${name}`} onClick={() => { setEditingCategory(name); setCategoryName(name); }}><Pencil size={16} /></button><button disabled={categoryBusy} aria-label={`Delete ${name}`} onClick={() => removeCategory(name)}><Trash2 size={16} /></button></span></div>)}</div></section>}
       {activeTab === "orders" && <section className="admin-panel admin-table-panel"><div className="panel-heading"><div><span className="eyebrow">CUSTOMER ORDERS</span><h2>{orders.length} orders</h2></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Order / customer</th><th>Items</th><th>Order total</th><th>Status</th><th>Manage</th></tr></thead><tbody>{orders.map((order) => <tr key={order.id}><td><span className="table-customer"><strong>{order.address?.name ?? "Customer"}</strong><small>#{order.id.slice(-9).toUpperCase()} · {order.address?.city}</small></span></td><td>{order.items.map((item) => `${item.quantity} × ${item.name}`).join(", ")}</td><td>{formatPrice(order.total)}</td><td><span className={`order-status status-${order.status}`}>{order.status}</span></td><td><span className="order-manage"><button className="customer-details-button" onClick={() => setSelectedOrder(order)}><Eye size={14} /> Customer details</button><select className="status-select" aria-label="Update order status" value={order.status} onChange={(event) => changeStatus(order.id, event.target.value)}>{["confirmed", "processing", "shipped", "delivered", "cancelled"].map((status) => <option key={status}>{status}</option>)}</select></span></td></tr>)}</tbody></table></div></section>}
+      {activeTab === "settings" && <section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">CHECKOUT OPTIONS</span><h2>Payment methods</h2></div></div><div className="payment-setting"><div><strong>Cash on delivery</strong><p>Allow customers to pay in cash when their order is delivered. This setting is disabled by default.</p><small>Status: {cashOnDeliveryEnabled ? "Enabled" : "Disabled"}</small></div><button type="button" className={`payment-setting-toggle ${cashOnDeliveryEnabled ? "enabled" : ""}`} role="switch" aria-checked={cashOnDeliveryEnabled} aria-label="Enable cash on delivery" disabled={settingsBusy} onClick={() => updateCashOnDelivery(!cashOnDeliveryEnabled)}><span /></button></div></section>}
     </main>
-    {adding && <ProductModal product={editing} busy={busy} onClose={() => { setAdding(false); setEditing(null); }} onSubmit={saveProduct} />}
+    {adding && <ProductModal product={editing} categories={categories} busy={busy} onClose={() => { setAdding(false); setEditing(null); }} onSubmit={saveProduct} />}
     {selectedOrder && <CustomerDetailsModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />}
   </div>;
 }
@@ -146,10 +197,10 @@ function Metric({ icon, label, value, note }: { icon: React.ReactNode; label: st
   return <article className="metric-card"><div className="metric-icon">{icon}</div><span>{label}</span><strong>{value}</strong><small>{note}</small></article>;
 }
 
-function ProductModal({ product, busy, onClose, onSubmit }: { product: Product | null; busy: boolean; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+function ProductModal({ product, categories, busy, onClose, onSubmit }: { product: Product | null; categories: string[]; busy: boolean; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><form className="product-modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">THE SWAG SHOPPING MALL SHELF</span><h2>{product ? "A little update." : "Something good."}</h2></div><button type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="form-grid">
     <label className="field-wide">Product name<input name="name" required defaultValue={product?.name ?? ""} /></label>
-    <label>Category<select name="category" defaultValue={product?.category ?? "Grocery"}>{["Grocery", "Home & Living", "Kitchen", "Personal Care", "Other"].map((item) => <option key={item}>{item}</option>)}</select></label>
+    <label>Category<select name="category" defaultValue={product?.category ?? categories[0]} required>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
     <label>Pack / unit<input name="unit" required placeholder="e.g. 1 kg" defaultValue={product?.unit ?? ""} /></label>
     <label>Selling price (₹)<input name="price" type="number" min="1" step="0.01" required defaultValue={product ? product.price / 100 : ""} /></label>
     <label>Original price (₹)<input name="mrp" type="number" min="1" step="0.01" required defaultValue={product ? product.mrp / 100 : ""} /></label>
