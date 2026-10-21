@@ -27,7 +27,19 @@ export default function ProductPage() {
         <div className={`availability ${product.stock > 0 ? "" : "unavailable"}`}><span />{product.stock > 0 ? `${product.stock} available · Ready to ship` : "Currently out of stock"}</div>
         <div className="detail-actions"><button className="button button-dark detail-add" disabled={product.stock < 1} onClick={() => addToCart(product.id)}>{cart[product.id] ? `Add another (${cart[product.id]} in bag)` : "Add to bag"} <Plus size={17} /></button><button className={`detail-save ${favorites.includes(product.id) ? "is-favorite" : ""}`} onClick={() => toggleFavorite(product.id)}><Heart size={18} fill={favorites.includes(product.id) ? "currentColor" : "none"} /> {favorites.includes(product.id) ? "Saved" : "Save for later"}</button></div>
         <div className="delivery-points"><span><Truck size={18} /><span><strong>Free delivery</strong><small>On orders above ₹999</small></span></span><span><ShieldCheck size={18} /><span><strong>Goodness guaranteed</strong><small>7-day easy returns</small></span></span></div>
-        <div className="detail-accordion"><strong>About this find</strong><p>{product.description} Carefully selected by our team for quality that makes the everyday a little better.</p></div>
+        <section className="product-specifications" aria-labelledby="product-specifications-title">
+          <h2 id="product-specifications-title">Product specifications</h2>
+          <p className="specification-description">{product.description}</p>
+          <dl>
+            <div><dt>Category</dt><dd>{product.category}</dd></div>
+            <div><dt>Pack size</dt><dd>{product.unit}</dd></div>
+            <div><dt>Customer rating</dt><dd>{product.rating.toFixed(1)} out of 5 ({product.reviews} reviews)</dd></div>
+            <div><dt>Availability</dt><dd>{product.stock > 0 ? "In stock" : "Out of stock"}</dd></div>
+            {Object.entries(product.specifications ?? {}).map(([label, value]) => (
+              <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
+            ))}
+          </dl>
+        </section>
       </div>
     </div>
     {!!related.length && <section className="related-section"><div className="section-heading"><div><span className="eyebrow">More to love</span><h2>Goes nicely with.</h2></div></div><div className="product-grid">{related.map((item) => <ProductCard key={item.id} product={item} />)}</div></section>}

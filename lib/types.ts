@@ -10,6 +10,7 @@ export type Product = {
   reviews: number;
   image: string;
   description: string;
+  specifications?: Record<string, string>;
   tags?: string[];
   active?: boolean;
 };

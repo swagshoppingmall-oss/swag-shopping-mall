@@ -86,8 +86,19 @@ export default function AdminPage() {
       unit: String(form.get("unit")).trim(), stock: Number(form.get("stock")), rating: Number(form.get("rating")),
       reviews: editing?.reviews ?? 0, image: String(form.get("image")).trim(),
       description: String(form.get("description")).trim(),
+      specifications: parseSpecifications(String(form.get("specifications") ?? "")),
       tags: String(form.get("tags")).split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean), active: true,
     };
+    const specificationsText = String(form.get("specifications") ?? "");
+    if (specificationsText.split("\n").some((line) => {
+      if (!line.trim()) return false;
+      const separator = line.indexOf(":");
+      return separator < 1 || !line.slice(0, separator).trim() || !line.slice(separator + 1).trim();
+    })) {
+      setError("Enter each specification as “Label: value”, one per line, with both fields filled in.");
+      setBusy(false);
+      return;
+    }
     try {
       if (demoLoginEnabled && user?.isDemo) saveDemoProduct(product, editing?.id);
       else if (editing) await updateDoc(doc(db, "products", editing.id), { ...product, updatedAt: serverTimestamp() });
@@ -193,6 +204,16 @@ function productWriteError(cause: unknown, fallback: string) {
   return cause instanceof Error ? cause.message : fallback;
 }
 
+function parseSpecifications(value: string): Record<string, string> {
+  return Object.fromEntries(value.split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const separator = line.indexOf(":");
+      return [line.slice(0, separator).trim(), line.slice(separator + 1).trim()];
+    }));
+}
+
 function Metric({ icon, label, value, note }: { icon: React.ReactNode; label: string; value: string; note: string }) {
   return <article className="metric-card"><div className="metric-icon">{icon}</div><span>{label}</span><strong>{value}</strong><small>{note}</small></article>;
 }
@@ -208,6 +229,7 @@ function ProductModal({ product, categories, busy, onClose, onSubmit }: { produc
     <label>Rating (0–5)<input name="rating" type="number" min="0" max="5" step="0.1" required defaultValue={product?.rating ?? 0} /></label>
     <label className="field-wide">Image URL<input name="image" type="url" required placeholder="https://..." defaultValue={product?.image ?? ""} /></label>
     <label className="field-wide">Description<textarea name="description" rows={3} required defaultValue={product?.description ?? ""} /></label>
+    <label className="field-wide">Product specifications<textarea name="specifications" rows={4} placeholder={"Material: 100% cotton\nCare: Machine washable"} defaultValue={Object.entries(product?.specifications ?? {}).map(([label, value]) => `${label}: ${value}`).join("\n")} /><small>One specification per line, in “Label: value” format.</small></label>
     <label className="field-wide">Tags, comma separated<input name="tags" placeholder="popular, organic" defaultValue={product?.tags?.join(", ") ?? ""} /></label>
   </div><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-dark" disabled={busy}>{busy ? "Saving..." : product ? "Save changes" : "Add to shelf"}</button></div></form></div>;
 }

@@ -22,6 +22,10 @@ export function ProductCard({ product }: { product: Product }) {
     <div className="product-card-info">
       <span className="product-category">{product.category} <span>· {product.unit}</span></span>
       <Link href={`/product/${product.id}`} className="product-title">{product.name}</Link>
+      <section className="product-card-details" aria-label="Product details">
+        <span>Product details</span>
+        <p>{product.description}</p>
+      </section>
       <div className="rating-line"><span className="rating-pill"><Star size={12} fill="currentColor" /> {product.rating?.toFixed(1) ?? "New"}</span><span className="review-count">({product.reviews ?? 0} reviews)</span></div>
       <div className="product-price-line"><strong>{formatPrice(product.price)}</strong>{product.mrp > product.price && <del>{formatPrice(product.mrp)}</del>}</div>
       <button className={`add-button ${cart[product.id] ? "added" : ""}`} onClick={() => addToCart(product.id)} disabled={unavailable}>{unavailable ? "Out of stock" : cart[product.id] ? `Add another · ${cart[product.id]} in bag` : "Add to bag"}<span>{unavailable ? "–" : "+"}</span></button>
