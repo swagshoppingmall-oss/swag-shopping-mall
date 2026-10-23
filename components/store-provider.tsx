@@ -10,10 +10,11 @@ import { auth, db, firebaseConfigured } from "@/lib/firebase";
 import { ADMIN_EMAIL } from "@/lib/admin";
 import { DEMO_PRODUCTS } from "@/lib/demo-products";
 import { DEMO_ADMIN, DEMO_CUSTOMER, DEMO_LOGIN_ENABLED } from "@/lib/demo-auth";
+import { cartLineKey, getProductPrice, isCartOptionValid, parseCartLineKey } from "@/lib/cart";
 import type { Product, StoreOrder } from "@/lib/types";
 
 type StoreUser = Pick<User, "uid" | "email" | "displayName"> & { isDemo?: boolean };
-const DEFAULT_CATEGORIES = ["Grocery", "Home & Living", "Kitchen"];
+const DEFAULT_CATEGORIES = ["Grocery", "Home & Living", "Kitchen", "Fashion"];
 
 type StoreContextValue = {
   products: Product[];
@@ -38,7 +39,7 @@ type StoreContextValue = {
   setSearch: (search: string) => void;
   setCategory: (category: string) => void;
   category: string;
-  addToCart: (id: string, amount?: number) => void;
+  addToCart: (id: string, amount?: number, option?: string) => void;
   setQuantity: (id: string, quantity: number) => void;
   removeFromCart: (id: string) => void;
   toggleFavorite: (id: string) => void;
@@ -220,22 +221,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     localStorage.setItem("bazaar-demo-products", JSON.stringify(products));
   }, [products, preferencesLoaded]);
 
-  const addToCart = useCallback((id: string, amount = 1) => {
+  const addToCart = useCallback((id: string, amount = 1, option?: string) => {
     setCart((previous) => {
       const product = products.find((item) => item.id === id);
-      const current = previous[id] ?? 0;
-      return { ...previous, [id]: Math.min(current + amount, product?.stock ?? 99, 99) };
+      if (!product || !isCartOptionValid(product, option)) return previous;
+      const key = cartLineKey(id, option);
+      const current = previous[key] ?? 0;
+      const otherOptionsQuantity = Object.entries(previous).reduce((total, [lineKey, quantity]) => {
+        return parseCartLineKey(lineKey).productId === id && lineKey !== key ? total + quantity : total;
+      }, 0);
+      return { ...previous, [key]: Math.min(current + amount, Math.max(0, product.stock - otherOptionsQuantity), 99) };
     });
   }, [products]);
   const setQuantity = useCallback((id: string, quantity: number) => {
     setCart((previous) => {
+      const { productId, option } = parseCartLineKey(id);
+      const product = products.find((item) => item.id === productId);
       if (quantity <= 0) {
         const next = { ...previous };
         delete next[id];
         return next;
       }
-      const product = products.find((item) => item.id === id);
-      return { ...previous, [id]: Math.min(quantity, product?.stock ?? 99, 99) };
+      if (!product || !isCartOptionValid(product, option)) return previous;
+      const otherOptionsQuantity = Object.entries(previous).reduce((total, [lineKey, lineQuantity]) => {
+        return parseCartLineKey(lineKey).productId === productId && lineKey !== id ? total + lineQuantity : total;
+      }, 0);
+      return { ...previous, [id]: Math.min(quantity, Math.max(0, product.stock - otherOptionsQuantity), 99) };
     });
   }, [products]);
   const removeFromCart = useCallback((id: string) => {
@@ -340,12 +351,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       throw new Error("Cash on delivery is currently unavailable.");
     }
 
-    const items = Object.entries(cart).map(([productId, quantity]) => {
+    const items = Object.entries(cart).map(([key, quantity]) => {
+      const { productId, option } = parseCartLineKey(key);
       const product = products.find((item) => item.id === productId);
       if (!product || product.active === false || product.stock < quantity) {
         throw new Error(`${product?.name ?? "A product"} is no longer available in the requested quantity.`);
       }
-      return { productId, name: product.name, price: product.price, quantity };
+      if (!isCartOptionValid(product, option)) {
+        throw new Error(`Choose a valid size for ${product.name}.`);
+      }
+      return { productId, name: product.name, price: getProductPrice(product, option), quantity, ...(option ? { option } : {}) };
+    });
+    const quantitiesByProduct = new Map<string, number>();
+    items.forEach((item) => quantitiesByProduct.set(item.productId, (quantitiesByProduct.get(item.productId) ?? 0) + item.quantity));
+    quantitiesByProduct.forEach((quantity, productId) => {
+      const product = products.find((item) => item.id === productId);
+      if (!product || product.stock < quantity) {
+        throw new Error(`${product?.name ?? "A product"} is no longer available in the requested quantity.`);
+      }
     });
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
     let discount = 0;
@@ -371,8 +394,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       payment: { provider: "demo", method: paymentMethod, paymentId: "DEMO-PAYMENT" },
     };
     setProducts((previous) => previous.map((product) => {
-      const line = cart[product.id];
-      return line ? { ...product, stock: Math.max(0, product.stock - line) } : product;
+      const quantity = quantitiesByProduct.get(product.id);
+      return quantity ? { ...product, stock: Math.max(0, product.stock - quantity) } : product;
     }));
     setOrders((previous) => {
       return [order, ...previous];

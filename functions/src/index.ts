@@ -11,7 +11,7 @@ const db = getFirestore();
 const razorpayKeyId = defineSecret("RAZORPAY_KEY_ID");
 const razorpayKeySecret = defineSecret("RAZORPAY_KEY_SECRET");
 
-type CartLine = { productId: string; quantity: number };
+type CartLine = { productId: string; quantity: number; option?: string };
 type Address = { name: string; phone: string; line1: string; city: string; state: string; pincode: string };
 
 function assertAddress(value: unknown): asserts value is Address {
@@ -32,17 +32,46 @@ function assertLines(value: unknown): asserts value is CartLine[] {
   }
   for (const line of value) {
     if (!line || typeof line.productId !== "string" || !/^[\w-]{1,100}$/.test(line.productId) ||
-      !Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > 99) {
+      !Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > 99 ||
+      (line.option !== undefined && (typeof line.option !== "string" || !line.option.trim() || line.option.length > 40))) {
       throw new HttpsError("invalid-argument", "Cart contains an invalid product or quantity.");
     }
   }
-  if (new Set(value.map((line: CartLine) => line.productId)).size !== value.length) {
-    throw new HttpsError("invalid-argument", "Each product may appear only once in the cart.");
+  if (new Set(value.map((line: CartLine) => `${line.productId}\u0000${line.option ?? ""}`)).size !== value.length) {
+    throw new HttpsError("invalid-argument", "Each product and option may appear only once in the cart.");
   }
 }
 
+function hasValidOption(product: FirebaseFirestore.DocumentData, option?: string) {
+  const categoryRequiresSize = product.hasSizeOptions === undefined &&
+    /fashion|apparel|clothing|footwear|shoes/i.test(String(product.category ?? ""));
+  if (product.hasSizeOptions !== true && !categoryRequiresSize) return option === undefined;
+  const defaultOptions = /footwear|shoes/i.test(String(product.category ?? ""))
+    ? ["6", "7", "8", "9", "10", "11"]
+    : ["S", "M", "L", "XL", "XXL"];
+  const options = Array.isArray(product.sizeOptions) && product.sizeOptions.length
+    ? product.sizeOptions
+    : categoryRequiresSize
+      ? defaultOptions
+      : [];
+  return typeof option === "string" && options.includes(option);
+}
+
+function getOptionPrice(product: FirebaseFirestore.DocumentData, option?: string) {
+  const optionPrice = option && product.sizePrices && typeof product.sizePrices === "object"
+    ? product.sizePrices[option]
+    : undefined;
+  if (optionPrice !== undefined) {
+    if (!Number.isSafeInteger(optionPrice) || optionPrice < 1) {
+      throw new HttpsError("failed-precondition", `The price for ${option} is invalid.`);
+    }
+    return optionPrice as number;
+  }
+  return product.price as number;
+}
+
 async function getPricedItems(lines: CartLine[]) {
-  const products = await Promise.all(lines.map(async (line) => {
+  const pricedProducts = await Promise.all(lines.map(async (line) => {
     const snap = await db.collection("products").doc(line.productId).get();
     if (!snap.exists) throw new HttpsError("not-found", `Product ${line.productId} is no longer available.`);
     const product = snap.data()!;
@@ -52,9 +81,31 @@ async function getPricedItems(lines: CartLine[]) {
     if (!Number.isInteger(product.price) || product.price < 1) {
       throw new HttpsError("failed-precondition", `${product.name ?? "A product"} has an invalid price.`);
     }
-    return { productId: line.productId, name: String(product.name), price: product.price, quantity: line.quantity };
+    if (!hasValidOption(product, line.option)) {
+      throw new HttpsError("failed-precondition", `Choose an available size for ${product.name ?? "this product"}.`);
+    }
+    const price = getOptionPrice(product, line.option);
+    if (!Number.isSafeInteger(price) || price < 1) {
+      throw new HttpsError("failed-precondition", `${product.name ?? "A product"} has an invalid price.`);
+    }
+    return {
+      item: {
+        productId: line.productId,
+        name: String(product.name),
+        price,
+        quantity: line.quantity,
+        ...(line.option ? { option: line.option } : {}),
+      },
+      stock: product.stock as number,
+    };
   }));
-  return products;
+  const quantitiesByProduct = new Map<string, number>();
+  pricedProducts.forEach(({ item, stock }) => {
+    const quantity = (quantitiesByProduct.get(item.productId) ?? 0) + item.quantity;
+    if (quantity > stock) throw new HttpsError("failed-precondition", `${item.name} does not have enough stock.`);
+    quantitiesByProduct.set(item.productId, quantity);
+  });
+  return pricedProducts.map(({ item }) => item);
 }
 
 async function getDiscount(couponCode: unknown, subtotal: number) {
@@ -88,14 +139,20 @@ export const createRazorpayOrder = onCall(
     const discount = await getDiscount(data.couponCode, subtotal);
 
     const total = Math.max(0, subtotal - discount);
-    if (total < 1) throw new HttpsError("failed-precondition", "Order total must be at least ₹1.");
+    if (total < 100) throw new HttpsError("failed-precondition", "Order total must be at least ₹1.");
     const razorpay = new Razorpay({ key_id: razorpayKeyId.value(), key_secret: razorpayKeySecret.value() });
-    const paymentOrder = await razorpay.orders.create({
-      amount: total,
-      currency: "INR",
-      receipt: `bz_${request.auth.uid.slice(0, 10)}_${Date.now()}`,
-      notes: { userId: request.auth.uid },
-    });
+    let paymentOrder;
+    try {
+      paymentOrder = await razorpay.orders.create({
+        amount: total,
+        currency: "INR",
+        receipt: `bz_${request.auth.uid.slice(0, 10)}_${Date.now()}`,
+        notes: { userId: request.auth.uid },
+      });
+    } catch (cause) {
+      console.error("Unable to create the Razorpay order.", cause);
+      throw new HttpsError("internal", "Unable to start payment checkout. Please try again.");
+    }
     const draftRef = db.collection("checkoutDrafts").doc(String(paymentOrder.id));
     await draftRef.create({
       userId: request.auth.uid,
@@ -127,14 +184,17 @@ export const createCashOnDeliveryOrder = onCall(async (request) => {
     if (settingsSnap.data()?.cashOnDeliveryEnabled !== true) {
       throw new HttpsError("failed-precondition", "Cash on delivery is currently unavailable.");
     }
-    const productRefs = items.map((item) => db.collection("products").doc(item.productId));
+    const quantitiesByProduct = new Map<string, number>();
+    items.forEach((item) => quantitiesByProduct.set(item.productId, (quantitiesByProduct.get(item.productId) ?? 0) + item.quantity));
+    const productRefs = [...quantitiesByProduct.keys()].map((productId) => db.collection("products").doc(productId));
     const productSnaps = await Promise.all(productRefs.map((ref) => transaction.get(ref)));
     productSnaps.forEach((snap, index) => {
       const product = snap.data();
-      const item = items[index];
+      const productId = productRefs[index].id;
+      const item = items.find((candidate) => candidate.productId === productId);
       if (!snap.exists || !product || product.active === false || !Number.isInteger(product.stock) ||
-        product.stock < item.quantity || product.price !== item.price) {
-        throw new HttpsError("failed-precondition", `${item.name} is no longer available at the requested price and quantity.`);
+        product.stock < quantitiesByProduct.get(productId)! || !items.filter((candidate) => candidate.productId === productId).every((candidate) => hasValidOption(product, candidate.option) && getOptionPrice(product, candidate.option) === candidate.price)) {
+        throw new HttpsError("failed-precondition", `${item?.name ?? "A product"} is no longer available at the requested price and quantity.`);
       }
     });
 
@@ -153,7 +213,7 @@ export const createCashOnDeliveryOrder = onCall(async (request) => {
       updatedAt: FieldValue.serverTimestamp(),
     });
     productSnaps.forEach((snap, index) => {
-      transaction.update(productRefs[index], { stock: snap.data()!.stock - items[index].quantity });
+      transaction.update(productRefs[index], { stock: snap.data()!.stock - quantitiesByProduct.get(productRefs[index].id)! });
     });
   });
   return { orderId: orderRef.id };
@@ -165,7 +225,9 @@ export const verifyRazorpayPayment = onCall(
     if (!request.auth) throw new HttpsError("unauthenticated", "Sign in before verifying payment.");
     const { razorpay_order_id: paymentOrderId, razorpay_payment_id: paymentId, razorpay_signature: signature } =
       request.data ?? {};
-    if (typeof paymentOrderId !== "string" || typeof paymentId !== "string" || typeof signature !== "string") {
+    if (typeof paymentOrderId !== "string" || !paymentOrderId ||
+      typeof paymentId !== "string" || !paymentId ||
+      typeof signature !== "string" || !/^[a-f\d]{64}$/i.test(signature)) {
       throw new HttpsError("invalid-argument", "Payment verification details are incomplete.");
     }
     const expected = createHmac("sha256", razorpayKeySecret.value())
@@ -191,13 +253,20 @@ export const verifyRazorpayPayment = onCall(
       if (draft.total !== payment.amount) throw new HttpsError("failed-precondition", "Captured payment amount does not match the checkout total.");
       if (draft.status === "paid") return { orderId: paymentOrderId, alreadyProcessed: true };
 
-      const productRefs = draft.items.map((item: { productId: string }) => db.collection("products").doc(item.productId));
-      const productSnaps = await Promise.all(productRefs.map((ref: FirebaseFirestore.DocumentReference) => transaction.get(ref)));
+      const quantitiesByProduct = new Map<string, number>();
+      draft.items.forEach((item: { productId: string; quantity: number }) => quantitiesByProduct.set(item.productId, (quantitiesByProduct.get(item.productId) ?? 0) + item.quantity));
+      const uniqueProductRefs = [...quantitiesByProduct.keys()].map((productId) => db.collection("products").doc(productId));
+      const productSnaps = await Promise.all(uniqueProductRefs.map((ref) => transaction.get(ref)));
       productSnaps.forEach((snap, index) => {
-        const item = draft.items[index];
+        const productId = uniqueProductRefs[index].id;
+        const item = draft.items.find((candidate: { productId: string }) => candidate.productId === productId);
+        const product = snap.data();
         const stock = snap.data()?.stock;
-        if (!snap.exists || !Number.isInteger(stock) || stock < item.quantity) {
-          throw new HttpsError("failed-precondition", `${item.name} is no longer available in the requested quantity.`);
+        if (!snap.exists || !product || product.active === false || !Number.isInteger(stock) ||
+          stock < quantitiesByProduct.get(productId)! ||
+          !draft.items.filter((candidate: { productId: string }) => candidate.productId === productId)
+            .every((candidate: { option?: string; price: number }) => hasValidOption(product, candidate.option) && getOptionPrice(product, candidate.option) === candidate.price)) {
+          throw new HttpsError("failed-precondition", `${item?.name ?? "A product"} is no longer available in the requested quantity.`);
         }
       });
       const order = {
@@ -209,7 +278,7 @@ export const verifyRazorpayPayment = onCall(
       };
       transaction.create(orderRef, order);
       productSnaps.forEach((snap, index) => {
-        transaction.update(productRefs[index], { stock: snap.data()!.stock - draft.items[index].quantity });
+        transaction.update(uniqueProductRefs[index], { stock: snap.data()!.stock - quantitiesByProduct.get(uniqueProductRefs[index].id)! });
       });
       transaction.create(db.collection("transactions").doc(paymentId), {
         userId: request.auth!.uid, orderId: paymentOrderId, paymentId, amount: draft.total,

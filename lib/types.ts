@@ -11,6 +11,9 @@ export type Product = {
   image: string;
   description: string;
   specifications?: Record<string, string>;
+  hasSizeOptions?: boolean;
+  sizeOptions?: string[];
+  sizePrices?: Record<string, number>;
   tags?: string[];
   active?: boolean;
 };
@@ -28,7 +31,7 @@ export type StoreOrder = {
   id: string;
   userId: string;
   customerEmail?: string;
-  items: Array<{ productId: string; name: string; price: number; quantity: number }>;
+  items: Array<{ productId: string; name: string; price: number; quantity: number; option?: string }>;
   address: DeliveryAddress;
   total: number;
   subtotal?: number;

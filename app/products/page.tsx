@@ -6,6 +6,7 @@ import { ArrowDownWideNarrow, RotateCcw, SlidersHorizontal } from "lucide-react"
 import { ProductCard } from "@/components/product-card";
 import { useStore } from "@/components/store-provider";
 import { firebaseConfigured } from "@/lib/firebase";
+import { getStartingPrice } from "@/lib/cart";
 import { formatPrice } from "@/lib/utils";
 
 type SortOrder = "featured" | "price-low" | "price-high" | "rating" | "name";
@@ -16,7 +17,7 @@ export default function ProductsPage() {
   const [inStockOnly, setInStockOnly] = useState(false);
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
 
-  const highestPrice = Math.max(0, ...products.map((product) => product.price));
+  const highestPrice = Math.max(0, ...products.map(getStartingPrice));
   const priceLimit = maxPrice === null ? highestPrice : Math.min(maxPrice, highestPrice);
   const categories = useMemo(() => ["All", ...storeCategories], [storeCategories]);
   const normalizedSearch = search.trim().toLocaleLowerCase();
@@ -26,14 +27,14 @@ export default function ProductsPage() {
       const searchableText = `${product.name} ${product.category} ${product.description} ${(product.tags ?? []).join(" ")}`.toLocaleLowerCase();
       return matchesCategory &&
         (!normalizedSearch || searchableText.includes(normalizedSearch)) &&
-        product.price <= priceLimit &&
+        getStartingPrice(product) <= priceLimit &&
         (!inStockOnly || product.stock > 0);
     });
 
     return filtered.sort((first, second) => {
       switch (sort) {
-        case "price-low": return first.price - second.price;
-        case "price-high": return second.price - first.price;
+        case "price-low": return getStartingPrice(first) - getStartingPrice(second);
+        case "price-high": return getStartingPrice(second) - getStartingPrice(first);
         case "rating": return second.rating - first.rating || second.reviews - first.reviews;
         case "name": return first.name.localeCompare(second.name);
         default:

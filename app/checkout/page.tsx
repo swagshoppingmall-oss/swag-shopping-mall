@@ -7,13 +7,19 @@ import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { ArrowLeft, ArrowRight, Check, CreditCard, LockKeyhole, Pencil, Tag, Truck, Wallet } from "lucide-react";
 import { useStore } from "@/components/store-provider";
+import { getProductPrice, isCartOptionValid, parseCartLineKey } from "@/lib/cart";
 import { db, firebaseConfigured, functions } from "@/lib/firebase";
 import type { DeliveryAddress } from "@/lib/types";
 import { formatPrice } from "@/lib/utils";
 
+type RazorpayFailure = { error?: { description?: string } };
+
 declare global {
   interface Window {
-    Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
+    Razorpay?: new (options: Record<string, unknown>) => {
+      open: () => void;
+      on: (event: "payment.failed", handler: (response: RazorpayFailure) => void) => void;
+    };
   }
 }
 
@@ -35,8 +41,12 @@ export default function CheckoutPage() {
   const [offerMessage, setOfferMessage] = useState("");
   const [offerApplied, setOfferApplied] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("upi");
-  const lines = Object.entries(cart).map(([productId, quantity]) => ({ productId, quantity, product: products.find((item) => item.id === productId) })).filter((line) => line.product);
-  const subtotal = lines.reduce((total, line) => total + line.product!.price * line.quantity, 0);
+  const lines = Object.entries(cart).map(([key, quantity]) => {
+    const { productId, option } = parseCartLineKey(key);
+    return { productId, quantity, option, product: products.find((item) => item.id === productId) };
+  }).filter((line) => line.product);
+  const invalidOptionLines = lines.filter(({ product, option }) => !isCartOptionValid(product!, option));
+  const subtotal = lines.reduce((total, line) => total + getProductPrice(line.product!, line.option) * line.quantity, 0);
   const demoMode = demoLoginEnabled && user?.isDemo === true;
   const discount = demoMode && offerApplied ? Math.min(Math.floor(subtotal * 0.1), 25000) : 0;
 
@@ -181,6 +191,10 @@ export default function CheckoutPage() {
   async function pay(event: FormEvent) {
     event.preventDefault();
     setMessage("");
+    if (invalidOptionLines.length) {
+      setMessage("A product in your bag now requires a size. Return to your bag, remove it, and add it again with a size selected.");
+      return;
+    }
     if (!user) { router.push("/login?next=/checkout"); return; }
     if (paymentMethod === "cod" && !cashOnDeliveryEnabled) {
       setPaymentMethod("upi");
@@ -221,11 +235,11 @@ export default function CheckoutPage() {
       try {
         await persistAddress();
         const createOrder = httpsCallable<
-          { items: Array<{ productId: string; quantity: number }>; address: DeliveryAddress; couponCode?: string },
+          { items: Array<{ productId: string; quantity: number; option?: string }>; address: DeliveryAddress; couponCode?: string },
           { orderId: string }
         >(functions, "createCashOnDeliveryOrder");
         const result = await createOrder({
-          items: lines.map(({ productId, quantity }) => ({ productId, quantity })),
+          items: lines.map(({ productId, quantity, option }) => ({ productId, quantity, ...(option ? { option } : {}) })),
           address,
           ...(couponCode.trim() ? { couponCode: couponCode.trim().toUpperCase() } : {}),
         });
@@ -247,11 +261,11 @@ export default function CheckoutPage() {
     try {
       await persistAddress();
       const createOrder = httpsCallable<
-        { items: Array<{ productId: string; quantity: number }>; address: DeliveryAddress; couponCode?: string },
+        { items: Array<{ productId: string; quantity: number; option?: string }>; address: DeliveryAddress; couponCode?: string },
         { orderId: string; amount: number; currency: string; keyId: string }
       >(functions, "createRazorpayOrder");
       const result = await createOrder({
-        items: lines.map(({ productId, quantity }) => ({ productId, quantity })),
+        items: lines.map(({ productId, quantity, option }) => ({ productId, quantity, ...(option ? { option } : {}) })),
         address,
         ...(couponCode.trim() ? { couponCode: couponCode.trim().toUpperCase() } : {}),
       });
@@ -273,6 +287,9 @@ export default function CheckoutPage() {
         modal: {
           ondismiss: () => setBusy(false),
         },
+      });
+      razorpay.on("payment.failed", (response) => {
+        setMessage(response.error?.description ?? "Payment failed. Please try again.");
       });
       razorpay.open();
     } catch (cause) {
@@ -312,11 +329,12 @@ export default function CheckoutPage() {
       <section className="checkout-section coupon-section"><div className="checkout-section-title"><span>02</span><div><h2>Have a little something extra?</h2><p>Apply a discount code</p></div></div><div className="coupon-input"><Tag size={17} /><input value={couponCode} onChange={(event) => { setCouponCode(event.target.value.toUpperCase()); setOfferApplied(false); setOfferMessage(""); }} placeholder="Enter discount code" /><button type="button" onClick={applyOffer}>{offerApplied ? "Applied ✓" : "Apply"}</button></div><p className={`coupon-hint ${offerApplied ? "offer-success" : offerMessage ? "offer-error" : ""}`}>{offerMessage || (demoMode ? "Try WELCOME10 for 10% off orders over ₹500 (up to ₹250 off)." : "Eligible offers are verified securely when you place your order.")}</p></section>
       <section className="checkout-section demo-payment-section"><div className="checkout-section-title"><span>03</span><div><h2>{demoMode ? "Try a payment option" : "Payment method"}</h2><p>{demoMode ? "No real charge—this is a safe demo checkout." : "Choose how you’d like to pay."}</p></div></div><div className="demo-payment-options"><label className={paymentMethod === "upi" ? "selected" : ""}><input type="radio" name="payment-method" value="upi" checked={paymentMethod === "upi"} disabled={busy || Boolean(pendingVerification)} onChange={() => setPaymentMethod("upi")} /><Wallet size={17} /><span><strong>UPI / online</strong><small>{demoMode ? "Simulate a successful payment" : "Pay securely with Razorpay"}</small></span><Check size={15} /></label>{cashOnDeliveryEnabled && <label className={paymentMethod === "cod" ? "selected" : ""}><input type="radio" name="payment-method" value="cod" checked={paymentMethod === "cod"} disabled={busy || Boolean(pendingVerification)} onChange={() => setPaymentMethod("cod")} /><CreditCard size={17} /><span><strong>Cash on delivery</strong><small>{demoMode ? "Test the COD order flow" : "Pay in cash when your order arrives"}</small></span><Check size={15} /></label>}{demoMode && <label className={paymentMethod === "fail" ? "selected" : ""}><input type="radio" name="payment-method" value="fail" checked={paymentMethod === "fail"} disabled={busy} onChange={() => setPaymentMethod("fail")} /><LockKeyhole size={17} /><span><strong>Payment failure</strong><small>Test a declined payment</small></span><Check size={15} /></label>}</div></section>
       {!user && <p className="form-error">Please <Link href="/login?next=/checkout">sign in</Link> before checkout.</p>}
+      {invalidOptionLines.length > 0 && <p className="form-error">A product in your bag now requires a size. Return to your bag, remove it, and add it again with a size selected.</p>}
       {message && <p className="form-error">{message}</p>}
-      <button className="button button-dark place-order-button" disabled={busy || addressLoading || savingAddress || (!demoMode && paymentMethod !== "cod" && !scriptReady && !pendingVerification)}>{submitLabel}</button>
+      <button className="button button-dark place-order-button" disabled={busy || addressLoading || savingAddress || invalidOptionLines.length > 0 || (!demoMode && paymentMethod !== "cod" && !scriptReady && !pendingVerification)}>{submitLabel}</button>
       <p className="secure-note"><LockKeyhole size={14} /> {demoMode ? "Demo only · No money will be charged" : paymentMethod === "cod" ? "No payment is taken now · Pay when your order arrives" : "Payments securely processed by Razorpay"}</p>
     </form>
-    <aside className="order-summary checkout-summary"><h2>A little recap</h2><div className="checkout-items">{lines.map(({ product, quantity }) => <div className="checkout-item" key={product!.id}><img src={product!.image} alt="" /><span><strong>{product!.name}</strong><small>Qty {quantity} · {product!.unit}</small></span><b>{formatPrice(product!.price * quantity)}</b></div>)}</div><div className="summary-row"><span>Subtotal</span><strong>{formatPrice(subtotal)}</strong></div>{discount > 0 && <div className="summary-row demo-discount"><span>WELCOME10 · 10% off</span><strong>−{formatPrice(discount)}</strong></div>}<div className="summary-row"><span>Delivery</span><strong>{subtotal >= 99900 ? "On us" : "At checkout"}</strong></div><div className="summary-row summary-total"><span>{demoMode ? "Demo total" : paymentMethod === "cod" ? "Order total" : "Total before offer"}</span><strong>{formatPrice(subtotal - discount)}</strong></div><p className="summary-note">{demoMode ? "Preview order only. No payment will be processed." : paymentMethod === "cod" ? "Pay the order total in cash when it's delivered." : "Any valid discount will be applied securely before payment."}</p><div className="delivery-estimate"><Truck size={18} /><span><strong>Thoughtful things, on their way</strong><small>Usually delivered in 3–5 business days</small></span></div></aside></div>
+    <aside className="order-summary checkout-summary"><h2>A little recap</h2><div className="checkout-items">{lines.map(({ product, quantity, option }, index) => <div className="checkout-item" key={`${product!.id}-${option ?? "default"}-${index}`}><img src={product!.image} alt="" /><span><strong>{product!.name}</strong><small>{option ? `Size ${option} · ` : ""}Qty ${quantity} · {product!.unit}</small></span><b>{formatPrice(getProductPrice(product!, option) * quantity)}</b></div>)}</div><div className="summary-row"><span>Subtotal</span><strong>{formatPrice(subtotal)}</strong></div>{discount > 0 && <div className="summary-row demo-discount"><span>WELCOME10 · 10% off</span><strong>−{formatPrice(discount)}</strong></div>}<div className="summary-row"><span>Delivery</span><strong>{subtotal >= 99900 ? "On us" : "At checkout"}</strong></div><div className="summary-row summary-total"><span>{demoMode ? "Demo total" : paymentMethod === "cod" ? "Order total" : "Total before offer"}</span><strong>{formatPrice(subtotal - discount)}</strong></div><p className="summary-note">{demoMode ? "Preview order only. No payment will be processed." : paymentMethod === "cod" ? "Pay the order total in cash when it's delivered." : "Any valid discount will be applied securely before payment."}</p><div className="delivery-estimate"><Truck size={18} /><span><strong>Thoughtful things, on their way</strong><small>Usually delivered in 3–5 business days</small></span></div></aside></div>
   </div>;
 }
 

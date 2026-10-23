@@ -594,6 +594,107 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .product-card, .product-image { transition: none !important; }
 }
 
+.product-option-picker {
+  min-width: 0;
+  margin: 19px 0;
+  border: 0;
+  padding: 0;
+}
+.product-option-picker legend {
+  margin-bottom: 10px;
+  color: #382852;
+  font-size: 12px;
+  font-weight: 700;
+}
+.product-option-picker legend span {
+  color: #837b8c;
+  font-size: 10px;
+  font-weight: 500;
+}
+.product-option-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.product-option {
+  min-width: 44px;
+  min-height: 42px;
+  border: 1px solid #e4dced;
+  border-radius: 10px;
+  padding: 0 12px;
+  background: #fffdfa;
+  color: #514666;
+  font-size: 12px;
+  font-weight: 650;
+  transition: border-color .18s ease, background .18s ease, color .18s ease, transform .18s ease;
+}
+.product-option:hover { transform: translateY(-1px); border-color: #a48ddd; }
+.product-option.selected {
+  border-color: #684bd1;
+  background: #684bd1;
+  color: white;
+  box-shadow: 0 5px 13px #684bd133;
+}
+.product-option-picker:focus-within { outline: none; }
+.size-options-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid #e7def1;
+  border-radius: 12px;
+  padding: 13px;
+  background: #faf7ff;
+}
+.size-options-toggle input {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  margin-top: 2px;
+  accent-color: #684bd1;
+}
+.size-options-toggle span { display: grid; gap: 4px; }
+.size-options-toggle strong { color: #382852; font-size: 12px; }
+.size-options-toggle small { color: #766e80; font-size: 10px; line-height: 1.5; }
+.size-price-note {
+  margin: 0;
+  border-radius: 10px;
+  padding: 11px 13px;
+  background: #f5f1fd;
+  color: #5d4b89;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.admin-size-options-enabled,
+.admin-size-options-disabled {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 5px 8px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.admin-size-options-enabled { background: #eee9fb; color: #5d46b3; }
+.admin-size-options-disabled { background: #f3f0ed; color: #766f78; }
+.cart-selected-option {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #f0eafd;
+  color: #57418e;
+  font-size: 10px;
+}
+.cart-missing-option { color: #b5483d; font-size: 10px; font-weight: 650; }
+
+@media (max-width: 680px) {
+  .product-option-picker { margin: 15px 0; }
+  .product-option { min-width: 40px; min-height: 39px; padding-inline: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .product-option { transition: none; }
+}
+
 /* Make product tiles feel like a polished, colorful boutique collection. */
 .product-grid { gap: 28px 21px; }
 .product-card {

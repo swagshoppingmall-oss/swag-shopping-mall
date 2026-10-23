@@ -36,7 +36,7 @@ A responsive wholesale-to-customer storefront for Swag Shopping Mall, built with
    firebase functions:secrets:set RAZORPAY_KEY_SECRET
    ```
 
-   Ensure the Firebase CLI is signed in to an account with access to `swag-shopping-mall`. The server callable returns the configured public key ID to the signed-in customer. Use test-mode Razorpay keys until ready for production.
+   Enter the Razorpay values when prompted; Firebase Secret Manager supplies them to the server functions. Do not put the key secret in `.env`, `.env.local`, or any `NEXT_PUBLIC_*` variable. The server callable returns only the public key ID to the signed-in customer. Use test-mode Razorpay keys until ready for production.
 
 4. Start Firestore, Authentication, and Functions emulators in one terminal, and the web app in another:
 
@@ -47,13 +47,13 @@ A responsive wholesale-to-customer storefront for Swag Shopping Mall, built with
 
    Set `NEXT_PUBLIC_FIREBASE_EMULATORS=true` in `.env.local` to connect the browser SDK to the local Auth, Firestore, and Functions emulators. Deploy a Functions emulator build with `cd functions && npm run build` first.
 
-5. The storefront includes eight sample products in `lib/demo-products.ts`, so the catalog is visible immediately before Firebase is configured. Local demo mode supports end-to-end preview authentication, coupon application, simulated payment success/failure, COD, order history/tracking, demo inventory, and admin catalog/order controls. Demo changes stay in browser storage; Firebase is required for live authentication, inventory, payment, and orders. To copy the sample catalog into Firestore, run the seeder from a trusted environment authenticated with Firebase Application Default Credentials:
+5. The storefront includes nine sample products in `lib/demo-products.ts`, including a size-selectable cotton T-shirt, so the catalog is visible immediately before Firebase is configured. Products can require size/options; configure this per item in the admin product editor, where each size can have its own price in rupees. Selected sizes and their server-verified prices are preserved in the bag and order. Local demo mode supports end-to-end preview authentication, coupon application, simulated payment success/failure, COD, order history/tracking, demo inventory, and admin catalog/order controls. Demo changes stay in browser storage; Firebase is required for live authentication, inventory, payment, and orders. To copy the sample catalog into Firestore, run the seeder from a trusted environment authenticated with Firebase Application Default Credentials:
 
    ```sh
    npm run seed
    ```
 
-   This adds eight example products and a `WELCOME10` coupon (10% off, ₹500 minimum, ₹250 maximum discount). Seed data is in `scripts/seed-products.ts`; prices are stored as integer paise.
+   This adds nine example products and a `WELCOME10` coupon (10% off, ₹500 minimum, ₹250 maximum discount). Seed data is in `scripts/seed-products.ts`; prices are stored as integer paise.
 
 6. To grant administrator access to the existing Firebase Authentication user `admin@swagshoppingmall.com`, first sign in with Google Application Default Credentials using an account authorized to manage Firebase Authentication, then run the Admin SDK script from the project root:
 

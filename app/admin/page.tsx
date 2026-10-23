@@ -10,8 +10,22 @@ import { auth, db, firebaseConfigured, functions } from "@/lib/firebase";
 import type { Product, StoreOrder } from "@/lib/types";
 import { formatPrice } from "@/lib/utils";
 
-const blankProduct: Omit<Product, "id"> = { name: "", category: "Grocery", price: 0, mrp: 0, unit: "", stock: 0, rating: 0, reviews: 0, image: "", description: "", tags: [], active: true };
+const blankProduct: Omit<Product, "id"> = { name: "", category: "Grocery", price: 0, mrp: 0, unit: "", stock: 0, rating: 0, reviews: 0, image: "", description: "", hasSizeOptions: false, sizeOptions: [], sizePrices: {}, tags: [], active: true };
 type ProductForm = typeof blankProduct;
+
+function isFashionCategory(category: string) {
+  return /fashion|apparel|clothing|footwear|shoes/i.test(category);
+}
+
+function defaultSizeOptions(category: string) {
+  return /footwear|shoes/i.test(category) ? "6, 7, 8, 9, 10, 11" : "S, M, L, XL, XXL";
+}
+
+function initialSizePricing(product: Product | null, category: string) {
+  const options = product?.sizeOptions?.length ? product.sizeOptions : defaultSizeOptions(category).split(",").map((option) => option.trim());
+  if (!product) return options.map((option) => `${option}: `).join("\n");
+  return options.map((option) => `${option}: ${((product.sizePrices?.[option] ?? product.price) / 100).toFixed(2)}`).join("\n");
+}
 
 export default function AdminPage() {
   const {
@@ -80,13 +94,35 @@ export default function AdminPage() {
     setBusy(true);
     setError("");
     const form = new FormData(event.currentTarget);
+    const hasSizeOptions = form.get("hasSizeOptions") === "true";
+    const sizePricingText = String(form.get("sizePricing") ?? "");
+    const sizePricingRows = hasSizeOptions ? sizePricingText.split("\n").filter((line) => line.trim()).map((line) => {
+      const separator = line.lastIndexOf(":");
+      const option = separator < 1 ? "" : line.slice(0, separator).trim();
+      const rawPrice = separator < 1 ? "" : line.slice(separator + 1).trim();
+      const price = Number(rawPrice);
+      return { option, price, valid: Boolean(option) && Boolean(rawPrice) && Number.isFinite(price) && price > 0 };
+    }) : [];
+    const options = sizePricingRows.map((row) => row.option);
+    if (hasSizeOptions && (!sizePricingRows.length ||
+      sizePricingRows.some((row) => !row.valid) ||
+      new Set(options).size !== options.length)) {
+      setError("Enter each size once with a price in rupees, one per line (for example “M: 499”).");
+      setBusy(false);
+      return;
+    }
+    const sizePrices = Object.fromEntries(sizePricingRows.map(({ option, price }) => [option, Math.round(price * 100)]));
     const product: ProductForm = {
       name: String(form.get("name")).trim(), category: String(form.get("category")),
-      price: Math.round(Number(form.get("price")) * 100), mrp: Math.round(Number(form.get("mrp")) * 100),
+      price: hasSizeOptions ? Math.min(...Object.values(sizePrices)) : Math.round(Number(form.get("price")) * 100),
+      mrp: Math.round(Number(form.get("mrp")) * 100),
       unit: String(form.get("unit")).trim(), stock: Number(form.get("stock")), rating: Number(form.get("rating")),
       reviews: editing?.reviews ?? 0, image: String(form.get("image")).trim(),
       description: String(form.get("description")).trim(),
       specifications: parseSpecifications(String(form.get("specifications") ?? "")),
+      hasSizeOptions,
+      sizeOptions: options,
+      sizePrices,
       tags: String(form.get("tags")).split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean), active: true,
     };
     const specificationsText = String(form.get("specifications") ?? "");
@@ -182,9 +218,9 @@ export default function AdminPage() {
       {activeTab === "overview" && <><div className="metric-grid"><Metric icon={<BarChart3 />} label="Total revenue" value={formatPrice(metrics.revenue)} note="From confirmed orders" /><Metric icon={<ShoppingBag />} label="Orders placed" value={String(metrics.orderCount)} note={`${orders.filter((order) => ["confirmed", "processing"].includes(order.status)).length} need attention`} /><Metric icon={<PackageCheck />} label="Items listed" value={String(products.length)} note={`${products.filter((product) => product.stock < 10).length} running low`} /><Metric icon={<BarChart3 />} label="Sales · last 7 days" value={formatPrice(metrics.weeklyRevenue)} note="Rolling seven-day revenue" /></div>
         <div className="admin-panels"><section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">ON THE MOVE</span><h2>Recent orders</h2></div><button onClick={() => setActiveTab("orders")} className="text-link">See all →</button></div>{orders.slice(0, 5).length ? orders.slice(0, 5).map((order) => <div className="recent-order" key={order.id}><span className="recent-order-icon"><ShoppingBag size={16} /></span><span><strong>{order.address?.name ?? "Customer"}</strong><small>#{order.id.slice(-8).toUpperCase()} · {order.items.length} items</small></span><b>{formatPrice(order.total)}</b><span className={`order-status status-${order.status}`}>{order.status}</span></div>) : <p className="admin-empty">Your first order is just around the corner.</p>}</section><section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">CUSTOMER FAVOURITES</span><h2>Top-selling products</h2></div></div>{metrics.topProducts.length ? metrics.topProducts.map((item, index) => <div className="top-product" key={item.name}><span className="top-rank">0{index + 1}</span><strong>{item.name}</strong><span>{item.quantity} sold</span></div>) : <p className="admin-empty">The bestsellers will show up after your first sale.</p>}</section></div>
         <section className="admin-panel sales-panel"><div className="panel-heading"><div><span className="eyebrow">A WEEK IN THE MAKING</span><h2>Revenue, day by day</h2></div><strong>{formatPrice(metrics.weeklyRevenue)}</strong></div><div className="sales-chart">{metrics.weeklySales.map((day) => { const peak = Math.max(...metrics.weeklySales.map((item) => item.revenue), 1); return <div className="sales-day" key={day.key}><span>{day.revenue ? formatPrice(day.revenue) : "—"}</span><div className="sales-bar-track"><i style={{ height: `${Math.max(day.revenue ? day.revenue / peak * 100 : 0, 3)}%` }} /></div><small>{day.date.toLocaleDateString("en-IN", { weekday: "short" })}</small></div>; })}</div></section></>}
-      {activeTab === "products" && <section className="admin-panel admin-table-panel"><div className="panel-heading"><div><span className="eyebrow">THE GOOD STUFF</span><h2>{products.length} products on the shelf</h2></div><button className="button button-dark admin-add" onClick={() => { setEditing(null); setAdding(true); }}><Plus size={16} /> Add product</button></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead><tbody>{products.map((product) => <tr key={product.id}><td><span className="table-product"><img src={product.image} alt="" /><span><strong>{product.name}</strong><small>{product.unit}</small></span></span></td><td>{product.category}</td><td>{formatPrice(product.price)}</td><td><span className={product.stock < 10 ? "low-stock" : ""}>{product.stock} units</span></td><td><span className="table-actions"><button onClick={() => { setEditing(product); setAdding(true); }} aria-label={`Edit ${product.name}`}><Pencil size={16} /></button><button onClick={() => deleteProduct(product)} aria-label={`Delete ${product.name}`}><Trash2 size={16} /></button></span></td></tr>)}</tbody></table></div></section>}
+      {activeTab === "products" && <section className="admin-panel admin-table-panel"><div className="panel-heading"><div><span className="eyebrow">THE GOOD STUFF</span><h2>{products.length} products on the shelf</h2></div><button className="button button-dark admin-add" onClick={() => { setEditing(null); setAdding(true); }}><Plus size={16} /> Add product</button></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Product</th><th>Category</th><th>Size options</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead><tbody>{products.map((product) => <tr key={product.id}><td><span className="table-product"><img src={product.image} alt="" /><span><strong>{product.name}</strong><small>{product.unit}</small></span></span></td><td>{product.category}</td><td>{product.hasSizeOptions ? <span className="admin-size-options-enabled">Enabled · {product.sizeOptions?.join(", ")}</span> : <span className="admin-size-options-disabled">Disabled</span>}</td><td>{formatPrice(product.price)}</td><td><span className={product.stock < 10 ? "low-stock" : ""}>{product.stock} units</span></td><td><span className="table-actions"><button onClick={() => { setEditing(product); setAdding(true); }} aria-label={`Edit ${product.name}`}><Pencil size={16} /></button><button onClick={() => deleteProduct(product)} aria-label={`Delete ${product.name}`}><Trash2 size={16} /></button></span></td></tr>)}</tbody></table></div></section>}
       {activeTab === "categories" && <section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">ORGANIZE THE SHOP</span><h2>Product categories</h2></div></div><form className="category-admin-form" onSubmit={submitCategory}><label>{editingCategory ? "Update category name" : "New category"}<input value={categoryName} maxLength={40} required placeholder="e.g. Personal Care" onChange={(event) => setCategoryName(event.target.value)} /></label><button className="button button-dark" disabled={categoryBusy || !categoryName.trim()}>{categoryBusy ? "Saving..." : editingCategory ? "Save changes" : <><Plus size={15} /> Add category</>}</button>{editingCategory && <button type="button" className="button button-outline" disabled={categoryBusy} onClick={() => { setEditingCategory(null); setCategoryName(""); }}>Cancel</button>}</form><div className="category-admin-list">{categories.map((name) => <div className="category-admin-row" key={name}><span><strong>{name}</strong><small>{products.filter((product) => product.category === name).length} products</small></span><span className="table-actions"><button disabled={categoryBusy} aria-label={`Edit ${name}`} onClick={() => { setEditingCategory(name); setCategoryName(name); }}><Pencil size={16} /></button><button disabled={categoryBusy} aria-label={`Delete ${name}`} onClick={() => removeCategory(name)}><Trash2 size={16} /></button></span></div>)}</div></section>}
-      {activeTab === "orders" && <section className="admin-panel admin-table-panel"><div className="panel-heading"><div><span className="eyebrow">CUSTOMER ORDERS</span><h2>{orders.length} orders</h2></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Order / customer</th><th>Items</th><th>Order total</th><th>Status</th><th>Manage</th></tr></thead><tbody>{orders.map((order) => <tr key={order.id}><td><span className="table-customer"><strong>{order.address?.name ?? "Customer"}</strong><small>#{order.id.slice(-9).toUpperCase()} · {order.address?.city}</small></span></td><td>{order.items.map((item) => `${item.quantity} × ${item.name}`).join(", ")}</td><td>{formatPrice(order.total)}</td><td><span className={`order-status status-${order.status}`}>{order.status}</span></td><td><span className="order-manage"><button className="customer-details-button" onClick={() => setSelectedOrder(order)}><Eye size={14} /> Customer details</button><select className="status-select" aria-label="Update order status" value={order.status} onChange={(event) => changeStatus(order.id, event.target.value)}>{["confirmed", "processing", "shipped", "delivered", "cancelled"].map((status) => <option key={status}>{status}</option>)}</select></span></td></tr>)}</tbody></table></div></section>}
+      {activeTab === "orders" && <section className="admin-panel admin-table-panel"><div className="panel-heading"><div><span className="eyebrow">CUSTOMER ORDERS</span><h2>{orders.length} orders</h2></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Order / customer</th><th>Items</th><th>Order total</th><th>Status</th><th>Manage</th></tr></thead><tbody>{orders.map((order) => <tr key={order.id}><td><span className="table-customer"><strong>{order.address?.name ?? "Customer"}</strong><small>#{order.id.slice(-9).toUpperCase()} · {order.address?.city}</small></span></td><td>{order.items.map((item) => `${item.quantity} × ${item.name}${item.option ? ` · Size ${item.option}` : ""}`).join(", ")}</td><td>{formatPrice(order.total)}</td><td><span className={`order-status status-${order.status}`}>{order.status}</span></td><td><span className="order-manage"><button className="customer-details-button" onClick={() => setSelectedOrder(order)}><Eye size={14} /> Customer details</button><select className="status-select" aria-label="Update order status" value={order.status} onChange={(event) => changeStatus(order.id, event.target.value)}>{["confirmed", "processing", "shipped", "delivered", "cancelled"].map((status) => <option key={status}>{status}</option>)}</select></span></td></tr>)}</tbody></table></div></section>}
       {activeTab === "settings" && <section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">CHECKOUT OPTIONS</span><h2>Payment methods</h2></div></div><div className="payment-setting"><div><strong>Cash on delivery</strong><p>Allow customers to pay in cash when their order is delivered. This setting is disabled by default.</p><small>Status: {cashOnDeliveryEnabled ? "Enabled" : "Disabled"}</small></div><button type="button" className={`payment-setting-toggle ${cashOnDeliveryEnabled ? "enabled" : ""}`} role="switch" aria-checked={cashOnDeliveryEnabled} aria-label="Enable cash on delivery" disabled={settingsBusy} onClick={() => updateCashOnDelivery(!cashOnDeliveryEnabled)}><span /></button></div></section>}
     </main>
     {adding && <ProductModal product={editing} categories={categories} busy={busy} onClose={() => { setAdding(false); setEditing(null); }} onSubmit={saveProduct} />}
@@ -219,16 +255,32 @@ function Metric({ icon, label, value, note }: { icon: React.ReactNode; label: st
 }
 
 function ProductModal({ product, categories, busy, onClose, onSubmit }: { product: Product | null; categories: string[]; busy: boolean; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  const initialCategory = product?.category ?? categories[0] ?? "Grocery";
+  const [category, setCategory] = useState(initialCategory);
+  const [hasSizeOptions, setHasSizeOptions] = useState(product?.hasSizeOptions ?? isFashionCategory(initialCategory));
+  const [sizePricing, setSizePricing] = useState(initialSizePricing(product, initialCategory));
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><form className="product-modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">THE SWAG SHOPPING MALL SHELF</span><h2>{product ? "A little update." : "Something good."}</h2></div><button type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="form-grid">
     <label className="field-wide">Product name<input name="name" required defaultValue={product?.name ?? ""} /></label>
-    <label>Category<select name="category" defaultValue={product?.category ?? categories[0]} required>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
+    <label>Category<select name="category" value={category} onChange={(event) => {
+      const nextCategory = event.target.value;
+      setCategory(nextCategory);
+      if (!product && isFashionCategory(nextCategory)) setHasSizeOptions(true);
+      if (!product) setSizePricing(initialSizePricing(null, nextCategory));
+    }} required>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
     <label>Pack / unit<input name="unit" required placeholder="e.g. 1 kg" defaultValue={product?.unit ?? ""} /></label>
-    <label>Selling price (₹)<input name="price" type="number" min="1" step="0.01" required defaultValue={product ? product.price / 100 : ""} /></label>
+    {hasSizeOptions
+      ? <p className="field-wide size-price-note">The product’s starting price will be set automatically to its lowest size price.</p>
+      : <label>Selling price (₹)<input name="price" type="number" min="1" step="0.01" required defaultValue={product ? product.price / 100 : ""} /></label>}
     <label>Original price (₹)<input name="mrp" type="number" min="1" step="0.01" required defaultValue={product ? product.mrp / 100 : ""} /></label>
     <label>Stock quantity<input name="stock" type="number" min="0" required defaultValue={product?.stock ?? 0} /></label>
     <label>Rating (0–5)<input name="rating" type="number" min="0" max="5" step="0.1" required defaultValue={product?.rating ?? 0} /></label>
     <label className="field-wide">Image URL<input name="image" type="url" required placeholder="https://..." defaultValue={product?.image ?? ""} /></label>
     <label className="field-wide">Description<textarea name="description" rows={3} required defaultValue={product?.description ?? ""} /></label>
+    <label className="field-wide size-options-toggle">
+      <input type="checkbox" name="hasSizeOptions" value="true" checked={hasSizeOptions} onChange={(event) => setHasSizeOptions(event.target.checked)} />
+      <span><strong>Customers must choose a size</strong><small>Enable for apparel, footwear, or any product with options.</small></span>
+    </label>
+    {hasSizeOptions && <label className="field-wide">Size and price (₹)<textarea name="sizePricing" rows={5} required value={sizePricing} onChange={(event) => setSizePricing(event.target.value)} placeholder={/footwear|shoes/i.test(category) ? "6: 699\n7: 699\n8: 749" : "S: 499\nM: 499\nL: 549\nXL: 599"} /><small>One option per line as “Size: price”. Prices are entered in rupees. Example: XL: 599.</small></label>}
     <label className="field-wide">Product specifications<textarea name="specifications" rows={4} placeholder={"Material: 100% cotton\nCare: Machine washable"} defaultValue={Object.entries(product?.specifications ?? {}).map(([label, value]) => `${label}: ${value}`).join("\n")} /><small>One specification per line, in “Label: value” format.</small></label>
     <label className="field-wide">Tags, comma separated<input name="tags" placeholder="popular, organic" defaultValue={product?.tags?.join(", ") ?? ""} /></label>
   </div><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-dark" disabled={busy}>{busy ? "Saving..." : product ? "Save changes" : "Add to shelf"}</button></div></form></div>;
@@ -259,7 +311,7 @@ function CustomerDetailsModal({ order, onClose }: { order: StoreOrder; onClose: 
         <CustomerDetail icon={<MapPin size={16} />} label="Delivery address" value={[order.address?.line1, order.address?.city, order.address?.state, order.address?.pincode].filter(Boolean).join(", ") || "Address not available"} wide />
       </div>
       {emailError && <p className="form-error customer-email-error">{emailError}</p>}
-      <div className="customer-order-summary"><div><span>Order total</span><strong>{formatPrice(order.total)}</strong></div><div><span>Order status</span><strong className={`order-status status-${order.status}`}>{order.status}</strong></div><div><span>Items</span><strong>{order.items.reduce((total, item) => total + item.quantity, 0)} items · {order.items.map((item) => item.name).join(", ")}</strong></div><div><span>Payment</span><strong>{order.payment?.provider === "demo" ? "Demo payment · Not charged" : order.payment?.provider === "razorpay" ? "Razorpay · Verified" : order.payment?.provider || "Not recorded"}</strong></div></div>
+      <div className="customer-order-summary"><div><span>Order total</span><strong>{formatPrice(order.total)}</strong></div><div><span>Order status</span><strong className={`order-status status-${order.status}`}>{order.status}</strong></div><div><span>Items</span><strong>{order.items.reduce((total, item) => total + item.quantity, 0)} items · {order.items.map((item) => `${item.name}${item.option ? ` (size ${item.option})` : ""}`).join(", ")}</strong></div><div><span>Payment</span><strong>{order.payment?.provider === "demo" ? "Demo payment · Not charged" : order.payment?.provider === "razorpay" ? "Razorpay · Verified" : order.payment?.provider || "Not recorded"}</strong></div></div>
       <div className="modal-actions"><button type="button" className="button button-dark" onClick={onClose}>Done</button></div>
     </section>
   </div>;
