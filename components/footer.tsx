@@ -25,6 +25,7 @@ export function Footer() {
       <div className="footer-bottom">
         <span className="copyright">© {new Date().getFullYear()} Swag Shopping Mall. All rights reserved.</span>
         <span className="footer-bottom-note">A little more joy in every order.</span>
+        <a className="footer-bottom-note" href="https://minah-tech.web.app">Developed BY MINAH-TECH</a>
       </div>
     </div>
   </footer>;
