@@ -3,16 +3,16 @@
 import { ArrowRight, Baby, BadgeCheck, Car, CookingPot, Dumbbell, Footprints, Grid2X2, House, Laptop, Leaf, Monitor, Package, PackageCheck, Shirt, ShoppingBasket, Smartphone, Sparkles, Star, Truck } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { ProductCard } from "@/components/product-card";
 import { useStore } from "@/components/store-provider";
 import { firebaseConfigured } from "@/lib/firebase";
 
 const heroSlides = [
   {
-    label: "Fresh groceries",
-    image: "https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1200&q=85",
-    alt: "Colorful fresh produce and everyday groceries in a bright market",
+    label: "Everyday shopping",
+    image: "https://images.unsplash.com/photo-1760565030346-4b947220fe3a?auto=format&fit=crop&w=1800&q=85",
+    alt: "Colorful shopping bags against a clean, light background",
   },
   {
     label: "Everyday fashion",
@@ -52,6 +52,9 @@ function categoryIcon(name: string) {
 export default function HomePage() {
   const shouldReduceMotion = useReducedMotion();
   const [activeHeroSlide, setActiveHeroSlide] = useState(0);
+  const heroStyle: CSSProperties & { "--hero-background-image": string } = {
+    "--hero-background-image": `url("${heroSlides[activeHeroSlide].image}")`,
+  };
   const { products, categories, categoryImages, loading, category, search, setCategory } = useStore();
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -67,7 +70,7 @@ export default function HomePage() {
   const featured = filtered.filter((product) => product.tags?.some((tag) => ["popular", "bestseller"].includes(tag)));
   const categoryShowcase = ["All", ...categories].map((item) => ({ name: item, icon: categoryIcon(item) }));
   return <div>
-    <section className="hero shell">
+    <section className="hero shell" style={heroStyle}>
       <div className="hero-copy">
         <span className="hero-kicker"><Sparkles size={14} /> THE FEEL-GOOD EDIT FOR EVERY DAY</span>
         <h1>Little joys.<br />Great finds.<br /><em>Better prices.</em></h1>
