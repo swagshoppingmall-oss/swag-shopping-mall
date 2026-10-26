@@ -1,12 +1,14 @@
 "use client";
 
-import { ArrowRight, BadgeCheck, Leaf, PackageCheck, Sparkles, Star, Truck } from "lucide-react";
+import { ArrowRight, BadgeCheck, House, Leaf, PackageCheck, Shirt, ShoppingBasket, Sparkles, Star, Truck } from "lucide-react";
+import { motion, useReducedMotion } from "framer-motion";
 import Link from "next/link";
 import { ProductCard } from "@/components/product-card";
 import { useStore } from "@/components/store-provider";
 import { firebaseConfigured } from "@/lib/firebase";
 
 export default function HomePage() {
+  const shouldReduceMotion = useReducedMotion();
   const { products, categories, loading, category, search, setCategory } = useStore();
   const normalized = search.trim().toLowerCase();
   const filtered = products.filter((product) =>
@@ -19,7 +21,13 @@ export default function HomePage() {
       <div className="hero-copy">
         <span className="hero-kicker"><Sparkles size={14} /> THE FEEL-GOOD EDIT FOR EVERY DAY</span>
         <h1>Little joys.<br />Great finds.<br /><em>Better prices.</em></h1>
-        <p>Make every day a little brighter with thoughtfully picked essentials for your home, kitchen, and grocery shelf.</p>
+        <div className="hero-intro">
+          <p>Make every day a little brighter with thoughtfully picked essentials for your home, kitchen, and grocery shelf.</p>
+          <div className="hero-mobile-feature">
+            <img src="https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=360&q=85" alt="Golden honey in a glass jar" />
+            <span>Everyday good finds</span>
+          </div>
+        </div>
         <div className="hero-actions">
           <button className="button button-dark hero-cta" onClick={() => { setCategory("All"); document.getElementById("shop")?.scrollIntoView({ behavior: "smooth" }); }}>Explore the collection <ArrowRight size={17} /></button>
           <span className="hero-delivery"><Truck size={16} /> Free delivery over ₹999</span>
@@ -33,6 +41,24 @@ export default function HomePage() {
       <div className="hero-visual">
         <div className="hero-image-halo" />
         <img className="hero-main-image" src="https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=1200&q=85" alt="Colorful fresh produce and everyday groceries in a bright market" />
+        <motion.div className="hero-shopping-mark hero-mark-fashion" aria-hidden="true"
+          initial={{ opacity: 1, scale: 1 }}
+          animate={shouldReduceMotion ? { opacity: 1, scale: 1 } : { opacity: 1, scale: 1, y: [0, -8, 0], rotate: [-4, 3, -4] }}
+          transition={{ duration: 3.2, delay: 0.2, repeat: shouldReduceMotion ? 0 : Infinity, ease: "easeInOut" }}>
+          <span className="hero-mark-icon"><Shirt size={17} /></span><span>Style picks</span>
+        </motion.div>
+        <motion.div className="hero-shopping-mark hero-mark-home" aria-hidden="true"
+          initial={{ opacity: 1, scale: 1 }}
+          animate={shouldReduceMotion ? { opacity: 1, scale: 1 } : { opacity: 1, scale: 1, y: [0, -9, 0], rotate: [3, -4, 3] }}
+          transition={{ duration: 3.5, delay: 0.55, repeat: shouldReduceMotion ? 0 : Infinity, ease: "easeInOut" }}>
+          <span className="hero-mark-icon"><House size={17} /></span><span>Home finds</span>
+        </motion.div>
+        <motion.div className="hero-shopping-mark hero-mark-daily" aria-hidden="true"
+          initial={{ opacity: 1, scale: 1 }}
+          animate={shouldReduceMotion ? { opacity: 1, scale: 1 } : { opacity: 1, scale: 1, y: [0, -7, 0], rotate: [-3, 4, -3] }}
+          transition={{ duration: 3.8, delay: 0.8, repeat: shouldReduceMotion ? 0 : Infinity, ease: "easeInOut" }}>
+          <span className="hero-mark-icon"><ShoppingBasket size={17} /></span><span>Daily essentials</span>
+        </motion.div>
         <div className="hero-stamp"><span>thoughtfully</span><strong>GOOD<br />FINDS</strong><span>for every day</span></div>
         <div className="hero-note"><span className="note-check">✓</span><span><strong>Goodness, delivered</strong><small>From our shelves to your home</small></span></div>
         <div className="hero-photo-chip"><img src="https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=180&q=80" alt="" /><span><small>A little golden goodness</small><strong>Wild forest honey</strong></span><span className="chip-sparkle">✦</span></div>

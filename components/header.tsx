@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import { Heart, Home, LogOut, Search, ShoppingBag, Store, UserRound } from "lucide-react";
 import { useStore } from "@/components/store-provider";
@@ -21,7 +22,7 @@ export function Header() {
       <div className="announcement">Thoughtful goods, fair prices <span>·</span> Free delivery on orders over ₹999</div>
       <header className="site-header">
         <div className="header-main shell">
-          <Link className="brand" href="/" aria-label="Swag Shopping Mall home"><span className="brand-mark">S</span><span>Swag Shopping Mall</span></Link>
+          <Link className="brand" href="/" aria-label="Swag Shopping Mall home"><Image className="brand-logo" src="/logo%201.png" alt="" width={40} height={40} /><span>Swag Shopping Mall</span></Link>
           <form className="search-box" onSubmit={(event) => { event.preventDefault(); router.push("/products"); }}>
             <Search size={18} />
             <input aria-label="Search products" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search for everyday good things..." />
