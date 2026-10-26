@@ -9,6 +9,7 @@ export type Product = {
   rating: number;
   reviews: number;
   image: string;
+  images?: string[];
   description: string;
   specifications?: Record<string, string>;
   hasSizeOptions?: boolean;

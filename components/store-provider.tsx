@@ -19,7 +19,8 @@ const DEFAULT_CATEGORIES = ["Grocery", "Home & Living", "Kitchen", "Fashion"];
 type StoreContextValue = {
   products: Product[];
   categories: string[];
-  saveCategory: (name: string, previousName?: string) => Promise<void>;
+  categoryImages: Record<string, string>;
+  saveCategory: (name: string, previousName?: string, imageUrl?: string) => Promise<void>;
   deleteCategory: (name: string) => Promise<void>;
   cashOnDeliveryEnabled: boolean;
   setCashOnDeliveryEnabled: (enabled: boolean) => Promise<void>;
@@ -54,6 +55,7 @@ const demoLoginEnabled = DEMO_LOGIN_ENABLED && !firebaseConfigured;
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>(DEMO_PRODUCTS);
   const [categories, setCategories] = useState(DEFAULT_CATEGORIES);
+  const [categoryImages, setCategoryImages] = useState<Record<string, string>>({});
   const [cashOnDeliveryEnabled, setCashOnDeliveryEnabledState] = useState(false);
   const [user, setUser] = useState<StoreUser | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -93,6 +95,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (Array.isArray(parsedCategories) && parsedCategories.every((item) => typeof item === "string")) {
             setCategories(parsedCategories);
           }
+          const savedCategoryImages = localStorage.getItem("bazaar-demo-category-images");
+          if (savedCategoryImages) {
+            const parsedImages: unknown = JSON.parse(savedCategoryImages);
+            if (parsedImages && typeof parsedImages === "object" && !Array.isArray(parsedImages) &&
+              Object.values(parsedImages).every((image) => typeof image === "string")) {
+              setCategoryImages(parsedImages as Record<string, string>);
+            }
+          }
         }
         const savedProducts = localStorage.getItem("bazaar-demo-products");
         if (savedProducts) setProducts(JSON.parse(savedProducts) as Product[]);
@@ -117,10 +127,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!firebaseConfigured) return;
     return onSnapshot(doc(db, "storeSettings", "catalog"), (snapshot) => {
-      const savedCategories: unknown = snapshot.data()?.categories;
+      const settings = snapshot.data();
+      const savedCategories: unknown = settings?.categories;
       setCategories(Array.isArray(savedCategories) && savedCategories.every((item) => typeof item === "string")
         ? savedCategories
         : DEFAULT_CATEGORIES);
+      const savedImages: unknown = settings?.categoryImages;
+      setCategoryImages(savedImages && typeof savedImages === "object" && !Array.isArray(savedImages) &&
+        Object.values(savedImages).every((image) => typeof image === "string")
+        ? savedImages as Record<string, string>
+        : {});
     }, (error) => {
       console.error("Unable to load store categories.", error);
       setCategories(DEFAULT_CATEGORIES);
@@ -276,7 +292,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }, { merge: true });
     setCashOnDeliveryEnabledState(enabled);
   }, [demoLoginEnabled, isAdmin, user]);
-  const saveCategory = useCallback(async (name: string, previousName?: string) => {
+  const saveCategory = useCallback(async (name: string, previousName?: string, imageUrl?: string) => {
     if (!isAdmin) throw new Error("Administrator access is required to manage categories.");
     const normalizedName = name.trim();
     if (!normalizedName) throw new Error("Enter a category name.");
@@ -290,13 +306,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const nextCategories = previousName
       ? categories.map((category) => category === previousName ? normalizedName : category)
       : [...categories, normalizedName];
+    const nextCategoryImages = { ...categoryImages };
+    if (previousName && previousName !== normalizedName) {
+      delete nextCategoryImages[previousName];
+      if (nextCategoryImages[normalizedName] === undefined && categoryImages[previousName]) {
+        nextCategoryImages[normalizedName] = categoryImages[previousName];
+      }
+    }
+    if (imageUrl !== undefined) {
+      if (imageUrl.trim()) nextCategoryImages[normalizedName] = imageUrl.trim();
+      else delete nextCategoryImages[normalizedName];
+    }
     if (user?.isDemo && demoLoginEnabled) {
       if (previousName) {
         setProducts((current) => current.map((product) =>
           product.category === previousName ? { ...product, category: normalizedName } : product));
       }
       localStorage.setItem("bazaar-demo-categories", JSON.stringify(nextCategories));
+      localStorage.setItem("bazaar-demo-category-images", JSON.stringify(nextCategoryImages));
       setCategories(nextCategories);
+      setCategoryImages(nextCategoryImages);
       if (category === previousName) setCategory(normalizedName);
       return;
     }
@@ -313,11 +342,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     await setDoc(doc(db, "storeSettings", "catalog"), {
       categories: nextCategories,
+      categoryImages: nextCategoryImages,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }, { mergeFields: ["categories", "categoryImages", "updatedAt"] });
     setCategories(nextCategories);
+    setCategoryImages(nextCategoryImages);
     if (category === previousName) setCategory(normalizedName);
-  }, [categories, category, demoLoginEnabled, isAdmin, user]);
+  }, [categories, category, categoryImages, demoLoginEnabled, isAdmin, user]);
   const deleteCategory = useCallback(async (name: string) => {
     if (!isAdmin) throw new Error("Administrator access is required to manage categories.");
     const nextCategories = categories.filter((category) => category !== name);
@@ -328,7 +359,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         throw new Error("Move or reassign this category's products before deleting it.");
       }
       localStorage.setItem("bazaar-demo-categories", JSON.stringify(nextCategories));
+      const nextCategoryImages = { ...categoryImages };
+      delete nextCategoryImages[name];
+      localStorage.setItem("bazaar-demo-category-images", JSON.stringify(nextCategoryImages));
       setCategories(nextCategories);
+      setCategoryImages(nextCategoryImages);
       if (category === name) setCategory("All");
       return;
     }
@@ -337,13 +372,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!matchingProducts.empty) {
       throw new Error("Move or reassign this category's products before deleting it.");
     }
+    const nextCategoryImages = { ...categoryImages };
+    delete nextCategoryImages[name];
     await setDoc(doc(db, "storeSettings", "catalog"), {
       categories: nextCategories,
+      categoryImages: nextCategoryImages,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }, { mergeFields: ["categories", "categoryImages", "updatedAt"] });
     setCategories(nextCategories);
+    setCategoryImages(nextCategoryImages);
     if (category === name) setCategory("All");
-  }, [categories, category, demoLoginEnabled, isAdmin, products, user]);
+  }, [categories, category, categoryImages, demoLoginEnabled, isAdmin, products, user]);
   const placeDemoOrder = useCallback((address: StoreOrder["address"], couponCode: string, paymentMethod: string) => {
     if (!demoLoginEnabled || !user?.isDemo) throw new Error("Sign in with the local demo customer to place a preview order.");
     if (!Object.keys(cart).length) throw new Error("Your bag is empty.");
@@ -482,7 +521,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setOrders((previous) => previous.map((order) => order.id === orderId ? { ...order, status } : order));
   }, [demoLoginEnabled, isAdmin, orders, user]);
   const value = useMemo(() => ({
-    products, categories, saveCategory, deleteCategory,
+    products, categories, categoryImages, saveCategory, deleteCategory,
     cashOnDeliveryEnabled, setCashOnDeliveryEnabled: updateCashOnDeliveryEnabled,
     user, isAdmin, demoLoginEnabled, signInDemo, signOutUser,
     saveDemoProduct, deleteDemoProduct, setDemoOrderStatus,
@@ -490,7 +529,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     category, setCategory, addToCart, setQuantity, removeFromCart, toggleFavorite, clearCart,
     placeDemoOrder, advanceDemoOrder,
   }), [products, user, isAdmin, cart, favorites, orders, loading, search, category,
-    categories, saveCategory, deleteCategory, cashOnDeliveryEnabled, updateCashOnDeliveryEnabled,
+    categories, categoryImages, saveCategory, deleteCategory, cashOnDeliveryEnabled, updateCashOnDeliveryEnabled,
     demoLoginEnabled, signInDemo, signOutUser, saveDemoProduct, deleteDemoProduct, setDemoOrderStatus,
     addToCart, setQuantity, removeFromCart, toggleFavorite, clearCart,
     placeDemoOrder, advanceDemoOrder]);

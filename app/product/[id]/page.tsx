@@ -13,11 +13,15 @@ export default function ProductPage() {
   const { id } = useParams<{ id: string }>();
   const { products, loading, addToCart, cart, favorites, toggleFavorite } = useStore();
   const [selectedOption, setSelectedOption] = useState("");
+  const [selectedImage, setSelectedImage] = useState("");
   useEffect(() => setSelectedOption(""), [id]);
+  useEffect(() => setSelectedImage(""), [id]);
   const product = products.find((item) => item.id === id);
   if (!product && loading) return <section className="shell page-shell"><Link href="/products" className="back-link"><ArrowLeft size={16} /> Back to all good things</Link><div className="loading-state"><span className="spinner" />Finding your good thing...</div></section>;
   if (!product) return <section className="shell page-shell empty-state"><h2>We couldn't find that item.</h2><p>It may have moved off our shelves.</p><Link className="button button-dark" href="/products">Back to all products</Link></section>;
   const needsOption = hasProductOptions(product);
+  const productImages = [...new Set([product.image, ...(product.images ?? [])].filter(Boolean))].slice(0, 3);
+  const shownImage = productImages.includes(selectedImage) ? selectedImage : productImages[0] ?? product.image;
   const productOptions = getProductOptions(product);
   const shownPrice = needsOption
     ? selectedOption ? getProductPrice(product, selectedOption) : getStartingPrice(product)
@@ -27,7 +31,10 @@ export default function ProductPage() {
   return <div className="shell page-shell">
     <Link href="/products" className="back-link"><ArrowLeft size={16} /> Back to all good things</Link>
     <div className="detail-layout">
-      <div className="detail-image"><img src={product.image} alt={product.name} />{discountPercent(product.mrp, shownPrice) > 0 && <span className="discount-badge">{discountPercent(product.mrp, shownPrice)}% off</span>}</div>
+      <div className="detail-gallery">
+        <div className="detail-image"><img src={shownImage} alt={`${product.name} view ${Math.max(productImages.indexOf(shownImage), 0) + 1}`} />{discountPercent(product.mrp, shownPrice) > 0 && <span className="discount-badge">{discountPercent(product.mrp, shownPrice)}% off</span>}</div>
+        {productImages.length > 1 && <div className="detail-thumbnails" aria-label="More product images">{productImages.map((image, index) => <button key={image} type="button" className={`detail-thumbnail ${shownImage === image ? "selected" : ""}`} onClick={() => setSelectedImage(image)} aria-label={`Show image ${index + 1} of ${product.name}`} aria-pressed={shownImage === image}><img src={image} alt="" /></button>)}</div>}
+      </div>
       <div className="detail-copy">
         <span className="eyebrow">{product.category} <span>·</span> {product.unit}</span>
         <h1>{product.name}</h1>

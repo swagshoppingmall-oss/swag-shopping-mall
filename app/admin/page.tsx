@@ -10,7 +10,7 @@ import { auth, db, firebaseConfigured, functions } from "@/lib/firebase";
 import type { Product, StoreOrder } from "@/lib/types";
 import { formatPrice } from "@/lib/utils";
 
-const blankProduct: Omit<Product, "id"> = { name: "", category: "Grocery", price: 0, mrp: 0, unit: "", stock: 0, rating: 0, reviews: 0, image: "", description: "", hasSizeOptions: false, sizeOptions: [], sizePrices: {}, tags: [], active: true };
+const blankProduct: Omit<Product, "id"> = { name: "", category: "Grocery", price: 0, mrp: 0, unit: "", stock: 0, rating: 0, reviews: 0, image: "", images: [], description: "", hasSizeOptions: false, sizeOptions: [], sizePrices: {}, tags: [], active: true };
 type ProductForm = typeof blankProduct;
 
 function isFashionCategory(category: string) {
@@ -29,7 +29,7 @@ function initialSizePricing(product: Product | null, category: string) {
 
 export default function AdminPage() {
   const {
-    user, isAdmin, products, categories, saveCategory, deleteCategory, orders: demoOrders, demoLoginEnabled,
+    user, isAdmin, products, categories, categoryImages, saveCategory, deleteCategory, orders: demoOrders, demoLoginEnabled,
     cashOnDeliveryEnabled, setCashOnDeliveryEnabled,
     saveDemoProduct, deleteDemoProduct, setDemoOrderStatus,
   } = useStore();
@@ -43,6 +43,7 @@ export default function AdminPage() {
   const [busy, setBusy] = useState(false);
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [categoryName, setCategoryName] = useState("");
+  const [categoryImage, setCategoryImage] = useState("");
   const [editingCategory, setEditingCategory] = useState<string | null>(null);
   const [categoryBusy, setCategoryBusy] = useState(false);
 
@@ -117,7 +118,9 @@ export default function AdminPage() {
       price: hasSizeOptions ? Math.min(...Object.values(sizePrices)) : Math.round(Number(form.get("price")) * 100),
       mrp: Math.round(Number(form.get("mrp")) * 100),
       unit: String(form.get("unit")).trim(), stock: Number(form.get("stock")), rating: Number(form.get("rating")),
-      reviews: editing?.reviews ?? 0, image: String(form.get("image")).trim(),
+      reviews: editing?.reviews ?? 0,
+      image: String(form.get("image")).trim(),
+      images: [...new Set(["image", "image2", "image3"].map((field) => String(form.get(field) ?? "").trim()).filter(Boolean))],
       description: String(form.get("description")).trim(),
       specifications: parseSpecifications(String(form.get("specifications") ?? "")),
       hasSizeOptions,
@@ -183,8 +186,9 @@ export default function AdminPage() {
     setError("");
     setCategoryBusy(true);
     try {
-      await saveCategory(categoryName, editingCategory ?? undefined);
+      await saveCategory(categoryName, editingCategory ?? undefined, categoryImage);
       setCategoryName("");
+      setCategoryImage("");
       setEditingCategory(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Category could not be saved.");
@@ -202,6 +206,7 @@ export default function AdminPage() {
       if (editingCategory === name) {
         setEditingCategory(null);
         setCategoryName("");
+        setCategoryImage("");
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Category could not be deleted.");
@@ -219,7 +224,20 @@ export default function AdminPage() {
         <div className="admin-panels"><section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">ON THE MOVE</span><h2>Recent orders</h2></div><button onClick={() => setActiveTab("orders")} className="text-link">See all →</button></div>{orders.slice(0, 5).length ? orders.slice(0, 5).map((order) => <div className="recent-order" key={order.id}><span className="recent-order-icon"><ShoppingBag size={16} /></span><span><strong>{order.address?.name ?? "Customer"}</strong><small>#{order.id.slice(-8).toUpperCase()} · {order.items.length} items</small></span><b>{formatPrice(order.total)}</b><span className={`order-status status-${order.status}`}>{order.status}</span></div>) : <p className="admin-empty">Your first order is just around the corner.</p>}</section><section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">CUSTOMER FAVOURITES</span><h2>Top-selling products</h2></div></div>{metrics.topProducts.length ? metrics.topProducts.map((item, index) => <div className="top-product" key={item.name}><span className="top-rank">0{index + 1}</span><strong>{item.name}</strong><span>{item.quantity} sold</span></div>) : <p className="admin-empty">The bestsellers will show up after your first sale.</p>}</section></div>
         <section className="admin-panel sales-panel"><div className="panel-heading"><div><span className="eyebrow">A WEEK IN THE MAKING</span><h2>Revenue, day by day</h2></div><strong>{formatPrice(metrics.weeklyRevenue)}</strong></div><div className="sales-chart">{metrics.weeklySales.map((day) => { const peak = Math.max(...metrics.weeklySales.map((item) => item.revenue), 1); return <div className="sales-day" key={day.key}><span>{day.revenue ? formatPrice(day.revenue) : "—"}</span><div className="sales-bar-track"><i style={{ height: `${Math.max(day.revenue ? day.revenue / peak * 100 : 0, 3)}%` }} /></div><small>{day.date.toLocaleDateString("en-IN", { weekday: "short" })}</small></div>; })}</div></section></>}
       {activeTab === "products" && <section className="admin-panel admin-table-panel"><div className="panel-heading"><div><span className="eyebrow">THE GOOD STUFF</span><h2>{products.length} products on the shelf</h2></div><button className="button button-dark admin-add" onClick={() => { setEditing(null); setAdding(true); }}><Plus size={16} /> Add product</button></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Product</th><th>Category</th><th>Size options</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead><tbody>{products.map((product) => <tr key={product.id}><td><span className="table-product"><img src={product.image} alt="" /><span><strong>{product.name}</strong><small>{product.unit}</small></span></span></td><td>{product.category}</td><td>{product.hasSizeOptions ? <span className="admin-size-options-enabled">Enabled · {product.sizeOptions?.join(", ")}</span> : <span className="admin-size-options-disabled">Disabled</span>}</td><td>{formatPrice(product.price)}</td><td><span className={product.stock < 10 ? "low-stock" : ""}>{product.stock} units</span></td><td><span className="table-actions"><button onClick={() => { setEditing(product); setAdding(true); }} aria-label={`Edit ${product.name}`}><Pencil size={16} /></button><button onClick={() => deleteProduct(product)} aria-label={`Delete ${product.name}`}><Trash2 size={16} /></button></span></td></tr>)}</tbody></table></div></section>}
-      {activeTab === "categories" && <section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">ORGANIZE THE SHOP</span><h2>Product categories</h2></div></div><form className="category-admin-form" onSubmit={submitCategory}><label>{editingCategory ? "Update category name" : "New category"}<input value={categoryName} maxLength={40} required placeholder="e.g. Personal Care" onChange={(event) => setCategoryName(event.target.value)} /></label><button className="button button-dark" disabled={categoryBusy || !categoryName.trim()}>{categoryBusy ? "Saving..." : editingCategory ? "Save changes" : <><Plus size={15} /> Add category</>}</button>{editingCategory && <button type="button" className="button button-outline" disabled={categoryBusy} onClick={() => { setEditingCategory(null); setCategoryName(""); }}>Cancel</button>}</form><div className="category-admin-list">{categories.map((name) => <div className="category-admin-row" key={name}><span><strong>{name}</strong><small>{products.filter((product) => product.category === name).length} products</small></span><span className="table-actions"><button disabled={categoryBusy} aria-label={`Edit ${name}`} onClick={() => { setEditingCategory(name); setCategoryName(name); }}><Pencil size={16} /></button><button disabled={categoryBusy} aria-label={`Delete ${name}`} onClick={() => removeCategory(name)}><Trash2 size={16} /></button></span></div>)}</div></section>}
+      {activeTab === "categories" && <section className="admin-panel">
+        <div className="panel-heading"><div><span className="eyebrow">ORGANIZE THE SHOP</span><h2>Product categories</h2></div></div>
+        <form className="category-admin-form" onSubmit={submitCategory}>
+          <label>{editingCategory ? "Update category name" : "New category"}<input value={categoryName} maxLength={40} required placeholder="e.g. Personal Care" onChange={(event) => setCategoryName(event.target.value)} /></label>
+          <label className="category-image-field">Category image URL <span>Optional</span><input type="url" value={categoryImage} placeholder="https://..." onChange={(event) => setCategoryImage(event.target.value)} /></label>
+          {categoryImage && <img className="category-image-preview" src={categoryImage} alt="Category preview" />}
+          <button className="button button-dark" disabled={categoryBusy || !categoryName.trim()}>{categoryBusy ? "Saving..." : editingCategory ? "Save changes" : <><Plus size={15} /> Add category</>}</button>
+          {editingCategory && <button type="button" className="button button-outline" disabled={categoryBusy} onClick={() => { setEditingCategory(null); setCategoryName(""); setCategoryImage(""); }}>Cancel</button>}
+        </form>
+        <div className="category-admin-list">{categories.map((name) => <div className="category-admin-row" key={name}>
+          <span className="category-admin-info">{categoryImages[name] ? <img src={categoryImages[name]} alt="" /> : <span className="category-admin-placeholder"><Tags size={17} /></span>}<span><strong>{name}</strong><small>{products.filter((product) => product.category === name).length} products</small></span></span>
+          <span className="table-actions"><button disabled={categoryBusy} aria-label={`Edit ${name}`} onClick={() => { setEditingCategory(name); setCategoryName(name); setCategoryImage(categoryImages[name] ?? ""); }}><Pencil size={16} /></button><button disabled={categoryBusy} aria-label={`Delete ${name}`} onClick={() => removeCategory(name)}><Trash2 size={16} /></button></span>
+        </div>)}</div>
+      </section>}
       {activeTab === "orders" && <section className="admin-panel admin-table-panel"><div className="panel-heading"><div><span className="eyebrow">CUSTOMER ORDERS</span><h2>{orders.length} orders</h2></div></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Order / customer</th><th>Items</th><th>Order total</th><th>Status</th><th>Manage</th></tr></thead><tbody>{orders.map((order) => <tr key={order.id}><td><span className="table-customer"><strong>{order.address?.name ?? "Customer"}</strong><small>#{order.id.slice(-9).toUpperCase()} · {order.address?.city}</small></span></td><td>{order.items.map((item) => `${item.quantity} × ${item.name}${item.option ? ` · Size ${item.option}` : ""}`).join(", ")}</td><td>{formatPrice(order.total)}</td><td><span className={`order-status status-${order.status}`}>{order.status}</span></td><td><span className="order-manage"><button className="customer-details-button" onClick={() => setSelectedOrder(order)}><Eye size={14} /> Customer details</button><select className="status-select" aria-label="Update order status" value={order.status} onChange={(event) => changeStatus(order.id, event.target.value)}>{["confirmed", "processing", "shipped", "delivered", "cancelled"].map((status) => <option key={status}>{status}</option>)}</select></span></td></tr>)}</tbody></table></div></section>}
       {activeTab === "settings" && <section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">CHECKOUT OPTIONS</span><h2>Payment methods</h2></div></div><div className="payment-setting"><div><strong>Cash on delivery</strong><p>Allow customers to pay in cash when their order is delivered. This setting is disabled by default.</p><small>Status: {cashOnDeliveryEnabled ? "Enabled" : "Disabled"}</small></div><button type="button" className={`payment-setting-toggle ${cashOnDeliveryEnabled ? "enabled" : ""}`} role="switch" aria-checked={cashOnDeliveryEnabled} aria-label="Enable cash on delivery" disabled={settingsBusy} onClick={() => updateCashOnDelivery(!cashOnDeliveryEnabled)}><span /></button></div></section>}
     </main>
@@ -274,7 +292,12 @@ function ProductModal({ product, categories, busy, onClose, onSubmit }: { produc
     <label>Original price (₹)<input name="mrp" type="number" min="1" step="0.01" required defaultValue={product ? product.mrp / 100 : ""} /></label>
     <label>Stock quantity<input name="stock" type="number" min="0" required defaultValue={product?.stock ?? 0} /></label>
     <label>Rating (0–5)<input name="rating" type="number" min="0" max="5" step="0.1" required defaultValue={product?.rating ?? 0} /></label>
-    <label className="field-wide">Image URL<input name="image" type="url" required placeholder="https://..." defaultValue={product?.image ?? ""} /></label>
+    <div className="field-wide admin-product-images">
+      <div><strong>Product images</strong><small>Add up to 3 image URLs. The first image appears in the catalog; customers can switch views on the product page.</small></div>
+      <label>Main image URL<input name="image" type="url" required placeholder="https://..." defaultValue={product?.images?.[0] ?? product?.image ?? ""} /></label>
+      <label>Second image URL <span>Optional</span><input name="image2" type="url" placeholder="https://..." defaultValue={product?.images?.[1] ?? ""} /></label>
+      <label>Third image URL <span>Optional</span><input name="image3" type="url" placeholder="https://..." defaultValue={product?.images?.[2] ?? ""} /></label>
+    </div>
     <label className="field-wide">Description<textarea name="description" rows={3} required defaultValue={product?.description ?? ""} /></label>
     <label className="field-wide size-options-toggle">
       <input type="checkbox" name="hasSizeOptions" value="true" checked={hasSizeOptions} onChange={(event) => setHasSizeOptions(event.target.checked)} />
