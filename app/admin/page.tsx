@@ -96,6 +96,8 @@ export default function AdminPage() {
     setError("");
     const form = new FormData(event.currentTarget);
     const hasSizeOptions = form.get("hasSizeOptions") === "true";
+    const returnAvailable = form.get("returnAvailable") === "true";
+    const returnDays = Number(form.get("returnDays"));
     const sizePricingText = String(form.get("sizePricing") ?? "");
     const sizePricingRows = hasSizeOptions ? sizePricingText.split("\n").filter((line) => line.trim()).map((line) => {
       const separator = line.lastIndexOf(":");
@@ -109,6 +111,11 @@ export default function AdminPage() {
       sizePricingRows.some((row) => !row.valid) ||
       new Set(options).size !== options.length)) {
       setError("Enter each size once with a price in rupees, one per line (for example “M: 499”).");
+      setBusy(false);
+      return;
+    }
+    if (returnAvailable && (!Number.isInteger(returnDays) || returnDays < 1)) {
+      setError("Enter a whole number of at least 1 for the return window.");
       setBusy(false);
       return;
     }
@@ -127,6 +134,8 @@ export default function AdminPage() {
       sizeOptions: options,
       sizePrices,
       tags: String(form.get("tags")).split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean), active: true,
+      returnAvailable,
+      returnDays: returnAvailable ? returnDays : editing?.returnDays ?? 7,
     };
     const specificationsText = String(form.get("specifications") ?? "");
     if (specificationsText.split("\n").some((line) => {
@@ -277,6 +286,7 @@ function ProductModal({ product, categories, busy, onClose, onSubmit }: { produc
   const [category, setCategory] = useState(initialCategory);
   const [hasSizeOptions, setHasSizeOptions] = useState(product?.hasSizeOptions ?? isFashionCategory(initialCategory));
   const [sizePricing, setSizePricing] = useState(initialSizePricing(product, initialCategory));
+  const [returnAvailable, setReturnAvailable] = useState(product?.returnAvailable !== false);
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><form className="product-modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">THE SWAG SHOPPING MALL SHELF</span><h2>{product ? "A little update." : "Something good."}</h2></div><button type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="form-grid">
     <label className="field-wide">Product name<input name="name" required defaultValue={product?.name ?? ""} /></label>
     <label>Category<select name="category" value={category} onChange={(event) => {
@@ -304,6 +314,11 @@ function ProductModal({ product, categories, busy, onClose, onSubmit }: { produc
       <span><strong>Customers must choose a size</strong><small>Enable for apparel, footwear, or any product with options.</small></span>
     </label>
     {hasSizeOptions && <label className="field-wide">Size and price (₹)<textarea name="sizePricing" rows={5} required value={sizePricing} onChange={(event) => setSizePricing(event.target.value)} placeholder={/footwear|shoes/i.test(category) ? "6: 699\n7: 699\n8: 749" : "S: 499\nM: 499\nL: 549\nXL: 599"} /><small>One option per line as “Size: price”. Prices are entered in rupees. Example: XL: 599.</small></label>}
+    <label className="field-wide size-options-toggle">
+      <input type="checkbox" name="returnAvailable" value="true" checked={returnAvailable} onChange={(event) => setReturnAvailable(event.target.checked)} />
+      <span><strong>Returns available</strong><small>Let customers return this product within a set number of days.</small></span>
+    </label>
+    {returnAvailable && <label>Return window (days)<input name="returnDays" type="number" min="1" step="1" required defaultValue={product?.returnDays ?? 7} /></label>}
     <label className="field-wide">Product specifications<textarea name="specifications" rows={4} placeholder={"Material: 100% cotton\nCare: Machine washable"} defaultValue={Object.entries(product?.specifications ?? {}).map(([label, value]) => `${label}: ${value}`).join("\n")} /><small>One specification per line, in “Label: value” format.</small></label>
     <label className="field-wide">Tags, comma separated<input name="tags" placeholder="popular, organic" defaultValue={product?.tags?.join(", ") ?? ""} /></label>
   </div><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-dark" disabled={busy}>{busy ? "Saving..." : product ? "Save changes" : "Add to shelf"}</button></div></form></div>;

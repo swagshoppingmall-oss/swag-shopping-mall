@@ -17,6 +17,8 @@ export type Product = {
   sizePrices?: Record<string, number>;
   tags?: string[];
   active?: boolean;
+  returnAvailable?: boolean;
+  returnDays?: number;
 };
 
 export type CartLine = { productId: string; quantity: number };

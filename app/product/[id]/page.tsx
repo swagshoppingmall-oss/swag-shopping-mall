@@ -47,7 +47,7 @@ export default function ProductPage() {
         </fieldset>}
         <div className={`availability ${product.stock > 0 ? "" : "unavailable"}`}><span />{product.stock > 0 ? `${product.stock} available · Ready to ship` : "Currently out of stock"}</div>
         <div className="detail-actions"><button className="button button-dark detail-add" disabled={product.stock < 1 || (needsOption && !selectedOption)} onClick={() => addToCart(product.id, 1, needsOption ? selectedOption : undefined)}>{needsOption && !selectedOption ? "Choose a size" : selectedCartQuantity ? `Add another (${selectedCartQuantity} in bag)` : "Add to bag"} <Plus size={17} /></button><button className={`detail-save ${favorites.includes(product.id) ? "is-favorite" : ""}`} onClick={() => toggleFavorite(product.id)}><Heart size={18} fill={favorites.includes(product.id) ? "currentColor" : "none"} /> {favorites.includes(product.id) ? "Saved" : "Save for later"}</button></div>
-        <div className="delivery-points"><span><Truck size={18} /><span><strong>Free delivery</strong><small>On orders above ₹999</small></span></span><span><ShieldCheck size={18} /><span><strong>Goodness guaranteed</strong><small>7-day easy returns</small></span></span></div>
+        <div className="delivery-points"><span><Truck size={18} /><span><strong>Free delivery</strong><small>On orders above ₹999</small></span></span><span><ShieldCheck size={18} /><span><strong>Return policy</strong><small>{product.returnAvailable === false ? "Returns are not available" : `Returns within ${product.returnDays ?? 7} days`}</small></span></span></div>
         <section className="product-specifications" aria-labelledby="product-specifications-title">
           <h2 id="product-specifications-title">Product specifications</h2>
           <p className="specification-description">{product.description}</p>
@@ -57,6 +57,7 @@ export default function ProductPage() {
             {needsOption && <div><dt>Available sizes</dt><dd>{productOptions.join(", ")}</dd></div>}
             <div><dt>Customer rating</dt><dd>{product.rating.toFixed(1)} out of 5 ({product.reviews} reviews)</dd></div>
             <div><dt>Availability</dt><dd>{product.stock > 0 ? "In stock" : "Out of stock"}</dd></div>
+            <div><dt>Return policy</dt><dd>{product.returnAvailable === false ? "Returns are not available" : `Eligible for return within ${product.returnDays ?? 7} days`}</dd></div>
             {Object.entries(product.specifications ?? {}).map(([label, value]) => (
               <div key={label}><dt>{label}</dt><dd>{value}</dd></div>
             ))}

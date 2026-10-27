@@ -1,35 +1,28 @@
 "use client";
 
-import { ArrowRight, Baby, BadgeCheck, Car, CookingPot, Dumbbell, Footprints, Grid2X2, House, Laptop, Leaf, Monitor, Package, PackageCheck, Shirt, ShoppingBasket, Smartphone, Sparkles, Star, Truck } from "lucide-react";
+import { ArrowRight, Baby, BadgeCheck, Car, CookingPot, Dumbbell, Footprints, Grid2X2, House, Laptop, Monitor, Package, PackageCheck, Shirt, ShoppingBasket, Smartphone, Sparkles, Truck } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import Link from "next/link";
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import { ProductCard } from "@/components/product-card";
 import { useStore } from "@/components/store-provider";
 import { firebaseConfigured } from "@/lib/firebase";
 
-const heroSlides = [
-  {
-    label: "Everyday shopping",
-    image: "https://images.unsplash.com/photo-1760565030346-4b947220fe3a?auto=format&fit=crop&w=1800&q=85",
-    alt: "Colorful shopping bags against a clean, light background",
-  },
-  {
-    label: "Everyday fashion",
-    image: "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1200&q=85",
-    alt: "Fashion shopper browsing a clothing collection",
-  },
-  {
-    label: "Home appliances",
-    image: "https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=1200&q=85",
-    alt: "Modern home kitchen with useful appliances",
-  },
-  {
-    label: "Smart mobiles",
-    image: "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=1200&q=85",
-    alt: "Smartphone showcasing a colorful screen",
-  },
-];
+const heroCategories = [
+  { label: "Fashion", image: "photo-1483985988355-763728e1935b" },
+  { label: "Sports", image: "photo-1571019613454-1cb2f99b2d8b" },
+  { label: "Mobiles", image: "photo-1511707171634-5f897ff02aa9" },
+  { label: "Home appliances", image: "photo-1583847268964-b28dc8f51f92" },
+  { label: "Grocery", image: "photo-1542838132-92c53300491e" },
+  { label: "Kitchen", image: "photo-1556911220-e15b29be8c8f" },
+  { label: "Home decor", image: "photo-1600210492486-724fe5c67fb0" },
+  { label: "Beauty", image: "photo-1596462502278-27bfdc403348" },
+  { label: "Footwear", image: "photo-1542291026-7eec264c27ff" },
+  { label: "Electronics", image: "photo-1498049794561-7780e7231661" },
+].map((item) => ({
+  ...item,
+  src: `https://images.unsplash.com/${item.image}?auto=format&fit=crop&w=1600&q=80`,
+}));
 
 function categoryIcon(name: string) {
   const category = name.toLowerCase();
@@ -52,15 +45,16 @@ function categoryIcon(name: string) {
 export default function HomePage() {
   const shouldReduceMotion = useReducedMotion();
   const [activeHeroSlide, setActiveHeroSlide] = useState(0);
-  const heroStyle: CSSProperties & { "--hero-background-image": string } = {
-    "--hero-background-image": `url("${heroSlides[activeHeroSlide].image}")`,
-  };
   const { products, categories, categoryImages, loading, category, search, setCategory } = useStore();
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      setActiveHeroSlide((current) => (current + 1) % heroSlides.length);
-    }, 3000);
-    return () => window.clearInterval(interval);
+    const timer = window.setInterval(() => {
+      setActiveHeroSlide((current) => (current + 1) % heroCategories.length);
+    }, 2000);
+    heroCategories.forEach(({ src }) => {
+      const image = new Image();
+      image.src = src;
+    });
+    return () => window.clearInterval(timer);
   }, []);
   const normalized = search.trim().toLowerCase();
   const filtered = products.filter((product) =>
@@ -70,77 +64,43 @@ export default function HomePage() {
   const featured = filtered.filter((product) => product.tags?.some((tag) => ["popular", "bestseller"].includes(tag)));
   const categoryShowcase = ["All", ...categories].map((item) => ({ name: item, icon: categoryIcon(item) }));
   return <div>
-    <section className="hero shell" style={heroStyle}>
-      <div className="hero-copy">
-        <span className="hero-kicker"><Sparkles size={14} /> THE FEEL-GOOD EDIT FOR EVERY DAY</span>
-        <h1>Little joys.<br />Great finds.<br /><em>Better prices.</em></h1>
-        <div className="hero-intro">
-          <p>Make every day a little brighter with thoughtfully picked essentials for your home, kitchen, and grocery shelf.</p>
-          <div className="hero-mobile-feature">
-            <img src="https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=360&q=85" alt="Golden honey in a glass jar" />
-            <span>Everyday good finds</span>
-          </div>
-        </div>
-        <div className="hero-actions">
-          <button className="button button-dark hero-cta" onClick={() => { setCategory("All"); document.getElementById("shop")?.scrollIntoView({ behavior: "smooth" }); }}>Explore the collection <ArrowRight size={17} /></button>
-          <span className="hero-delivery"><Truck size={16} /> Free delivery over ₹999</span>
-        </div>
-        <div className="hero-social-proof">
-          <div className="hero-avatars" aria-hidden="true"><span>A</span><span>M</span><span>S</span><span>+</span></div>
-          <div className="hero-social-copy"><span className="hero-stars"><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /><Star size={12} fill="currentColor" /><strong>4.9</strong></span><small>Loved by happy homes everywhere</small></div>
-        </div>
-        <div className="hero-proof"><span><BadgeCheck size={16} /> Quality checked</span><span><Leaf size={16} /> Thoughtfully sourced</span></div>
+    <section className="hero shell hero-editorial" aria-label="Featured shopping categories">
+      <div className="hero-slideshow" aria-hidden="true">
+        <AnimatePresence initial={false}>
+          <motion.img
+            key={heroCategories[activeHeroSlide].label}
+            className="hero-slideshow-image"
+            src={heroCategories[activeHeroSlide].src}
+            alt=""
+            initial={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 1.12, x: 36 }}
+            animate={{ opacity: 1, scale: 1, x: 0 }}
+            exit={shouldReduceMotion ? { opacity: 0 } : { opacity: 0, scale: 1.04, x: -24 }}
+            transition={shouldReduceMotion ? { duration: 0.15 } : { duration: 0.85, ease: [0.22, 1, 0.36, 1] }}
+          />
+        </AnimatePresence>
       </div>
-      <div className="hero-visual">
-        <div className="hero-image-halo" />
-        <div className="hero-carousel" aria-label={`${heroSlides[activeHeroSlide].label}, slide ${activeHeroSlide + 1} of ${heroSlides.length}`}>
-          <AnimatePresence initial={false}>
-            <motion.div
-              key={heroSlides[activeHeroSlide].image}
-              className="hero-carousel-slide"
-              initial={shouldReduceMotion
-                ? { opacity: 1, scale: 1, x: 0, rotateY: 0, filter: "blur(0px)" }
-                : { opacity: 0, scale: 1.08, x: 34, rotateY: 7, filter: "blur(3px)" }}
-              animate={shouldReduceMotion
-                ? { opacity: 1, scale: 1, x: 0, rotateY: 0, filter: "blur(0px)" }
-                : { opacity: 1, scale: 1, x: 0, rotateY: 0, filter: "blur(0px)" }}
-              exit={shouldReduceMotion
-                ? { opacity: 1 }
-                : { opacity: 0, scale: 0.96, x: -34, rotateY: -6, filter: "blur(3px)" }}
-              transition={shouldReduceMotion ? { duration: 0 } : { duration: 0.9, ease: "easeOut" }}
-            >
-              <img className="hero-main-image" src={heroSlides[activeHeroSlide].image} alt={heroSlides[activeHeroSlide].alt} />
-            </motion.div>
-          </AnimatePresence>
-        </div>
-        <motion.div className="hero-shopping-mark hero-mark-fashion" aria-hidden="true"
-          initial={{ opacity: 1, scale: 1 }}
-          animate={shouldReduceMotion ? { opacity: 1, scale: 1 } : { opacity: 1, scale: 1, y: [0, -8, 0], rotate: [-4, 3, -4] }}
-          transition={{ duration: 3.2, delay: 0.2, repeat: shouldReduceMotion ? 0 : Infinity, ease: "easeInOut" }}>
-          <span className="hero-mark-icon"><Shirt size={17} /></span><span>Style picks</span>
-        </motion.div>
-        <motion.div className="hero-shopping-mark hero-mark-home" aria-hidden="true"
-          initial={{ opacity: 1, scale: 1 }}
-          animate={shouldReduceMotion ? { opacity: 1, scale: 1 } : { opacity: 1, scale: 1, y: [0, -9, 0], rotate: [3, -4, 3] }}
-          transition={{ duration: 3.5, delay: 0.55, repeat: shouldReduceMotion ? 0 : Infinity, ease: "easeInOut" }}>
-          <span className="hero-mark-icon"><House size={17} /></span><span>Home finds</span>
-        </motion.div>
-        <motion.div className="hero-shopping-mark hero-mark-daily" aria-hidden="true"
-          initial={{ opacity: 1, scale: 1 }}
-          animate={shouldReduceMotion ? { opacity: 1, scale: 1 } : { opacity: 1, scale: 1, y: [0, -7, 0], rotate: [-3, 4, -3] }}
-          transition={{ duration: 3.8, delay: 0.8, repeat: shouldReduceMotion ? 0 : Infinity, ease: "easeInOut" }}>
-          <span className="hero-mark-icon"><ShoppingBasket size={17} /></span><span>Daily essentials</span>
-        </motion.div>
-        <div className="hero-stamp"><span>thoughtfully</span><strong>GOOD<br />FINDS</strong><span>for every day</span></div>
-        <div className="hero-note"><span className="note-check">✓</span><span><strong>Goodness, delivered</strong><small>From our shelves to your home</small></span></div>
-        <div className="hero-photo-chip"><img src="https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=180&q=80" alt="" /><span><small>A little golden goodness</small><strong>Wild forest honey</strong></span><span className="chip-sparkle">✦</span></div>
-        <div className="hero-image-caption"><span className="caption-dot" /> {heroSlides[activeHeroSlide].label}</div>
-        <div className="hero-carousel-dots" aria-label="Choose hero image">
-          {heroSlides.map((slide, index) => <button key={slide.label} type="button" className={activeHeroSlide === index ? "active" : ""} aria-label={`Show ${slide.label}`} aria-pressed={activeHeroSlide === index} onClick={() => setActiveHeroSlide(index)} />)}
+      <div className="hero-copy">
+        <span className="hero-kicker">A LITTLE LESS MIDDLE, A LOT MORE VALUE</span>
+        <h1>Good things should feel good<br className="hero-desktop-break" /> to buy. <em>And to bring home.</em></h1>
+        <p className="hero-slide-category">Discover something good in <strong>{heroCategories[activeHeroSlide].label}</strong></p>
+        <Link className="hero-editorial-link" href="#shop" onClick={() => setCategory("All")}>
+          Meet your new favourites <ArrowRight size={17} />
+        </Link>
+        <div className="hero-slide-controls" aria-label="Choose a featured category">
+          {heroCategories.map((item, index) => (
+            <button
+              key={item.label}
+              type="button"
+              className={index === activeHeroSlide ? "active" : ""}
+              aria-label={`Show ${item.label}`}
+              aria-pressed={index === activeHeroSlide}
+              onClick={() => setActiveHeroSlide(index)}
+            />
+          ))}
         </div>
       </div>
     </section>
-    <section className="trust-strip"><div className="shell trust-items"><span><Truck size={19} /><strong>Free delivery</strong> above ₹999</span><span><BadgeCheck size={19} /><strong>Quality first</strong> always</span><span><PackageCheck size={19} /><strong>Easy returns</strong> within 7 days</span></div></section>
+    <section className="trust-strip"><div className="shell trust-items"><span><Truck size={19} /><strong>Free delivery</strong> above ₹999</span><span><BadgeCheck size={19} /><strong>Quality first</strong> always</span><span><PackageCheck size={19} /><strong>Product-specific</strong> return policies</span></div></section>
     <section className="category-showcase-section shell" aria-label="Shop by category">
       <div className="category-showcase">
         {categoryShowcase.map((item) => <button key={item.name} type="button" className={`category-showcase-card ${category === item.name ? "selected" : ""}`} onClick={() => {
