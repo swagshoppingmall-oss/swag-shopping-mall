@@ -120,9 +120,28 @@ export default function AdminPage() {
       return;
     }
     const sizePrices = Object.fromEntries(sizePricingRows.map(({ option, price }) => [option, Math.round(price * 100)]));
+    const sellingPrice = Number(form.get("price"));
+    if (!Number.isFinite(sellingPrice) || sellingPrice <= 0) {
+      setError("Enter a selling price greater than zero.");
+      setBusy(false);
+      return;
+    }
+    const sellingPriceCents = Math.round(sellingPrice * 100);
+    if (hasSizeOptions) {
+      const currentStartingPrice = Math.min(...Object.values(sizePrices));
+      const adjustment = sellingPriceCents - currentStartingPrice;
+      for (const [option, price] of Object.entries(sizePrices)) {
+        sizePrices[option] = price + adjustment;
+      }
+      if (Object.values(sizePrices).some((price) => price <= 0)) {
+        setError("The selling price adjustment would make a size price zero or less.");
+        setBusy(false);
+        return;
+      }
+    }
     const product: ProductForm = {
       name: String(form.get("name")).trim(), category: String(form.get("category")),
-      price: hasSizeOptions ? Math.min(...Object.values(sizePrices)) : Math.round(Number(form.get("price")) * 100),
+      price: sellingPriceCents,
       mrp: Math.round(Number(form.get("mrp")) * 100),
       unit: String(form.get("unit")).trim(), stock: Number(form.get("stock")), rating: Number(form.get("rating")),
       reviews: editing?.reviews ?? 0,
@@ -286,6 +305,7 @@ function ProductModal({ product, categories, busy, onClose, onSubmit }: { produc
   const [category, setCategory] = useState(initialCategory);
   const [hasSizeOptions, setHasSizeOptions] = useState(product?.hasSizeOptions ?? isFashionCategory(initialCategory));
   const [sizePricing, setSizePricing] = useState(initialSizePricing(product, initialCategory));
+  const [sellingPrice, setSellingPrice] = useState(product ? (product.price / 100).toFixed(2) : "");
   const [returnAvailable, setReturnAvailable] = useState(product?.returnAvailable !== false);
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><form className="product-modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">THE SWAG SHOPPING MALL SHELF</span><h2>{product ? "A little update." : "Something good."}</h2></div><button type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="form-grid">
     <label className="field-wide">Product name<input name="name" required defaultValue={product?.name ?? ""} /></label>
@@ -296,9 +316,8 @@ function ProductModal({ product, categories, busy, onClose, onSubmit }: { produc
       if (!product) setSizePricing(initialSizePricing(null, nextCategory));
     }} required>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
     <label>Pack / unit<input name="unit" required placeholder="e.g. 1 kg" defaultValue={product?.unit ?? ""} /></label>
-    {hasSizeOptions
-      ? <p className="field-wide size-price-note">The product’s starting price will be set automatically to its lowest size price.</p>
-      : <label>Selling price (₹)<input name="price" type="number" min="1" step="0.01" required defaultValue={product ? product.price / 100 : ""} /></label>}
+    <label>Selling price (₹)<input name="price" type="number" min="0.01" step="0.01" required value={sellingPrice} onChange={(event) => setSellingPrice(event.target.value)} /></label>
+    {hasSizeOptions && <p className="field-wide size-price-note">This is the starting price. Changing it adjusts every size price by the same amount; you can also edit each size below.</p>}
     <label>Original price (₹)<input name="mrp" type="number" min="1" step="0.01" required defaultValue={product ? product.mrp / 100 : ""} /></label>
     <label>Stock quantity<input name="stock" type="number" min="0" required defaultValue={product?.stock ?? 0} /></label>
     <label>Rating (0–5)<input name="rating" type="number" min="0" max="5" step="0.1" required defaultValue={product?.rating ?? 0} /></label>
