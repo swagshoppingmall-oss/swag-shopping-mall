@@ -95,6 +95,9 @@ async function getPricedItems(lines: CartLine[]) {
         price,
         quantity: line.quantity,
         ...(line.option ? { option: line.option } : {}),
+        ...(typeof product.category === "string" ? { category: product.category } : {}),
+        ...(typeof product.unit === "string" ? { unit: product.unit } : {}),
+        ...(typeof product.image === "string" ? { image: product.image } : {}),
       },
       stock: product.stock as number,
     };

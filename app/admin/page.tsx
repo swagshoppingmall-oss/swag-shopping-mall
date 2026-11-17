@@ -368,7 +368,26 @@ function CustomerDetailsModal({ order, onClose }: { order: StoreOrder; onClose: 
         <CustomerDetail icon={<MapPin size={16} />} label="Delivery address" value={[order.address?.line1, order.address?.city, order.address?.state, order.address?.pincode].filter(Boolean).join(", ") || "Address not available"} wide />
       </div>
       {emailError && <p className="form-error customer-email-error">{emailError}</p>}
-      <div className="customer-order-summary"><div><span>Order total</span><strong>{formatPrice(order.total)}</strong></div><div><span>Order status</span><strong className={`order-status status-${order.status}`}>{order.status}</strong></div><div><span>Items</span><strong>{order.items.reduce((total, item) => total + item.quantity, 0)} items · {order.items.map((item) => `${item.name}${item.option ? ` (size ${item.option})` : ""}`).join(", ")}</strong></div><div><span>Payment</span><strong>{order.payment?.provider === "demo" ? "Demo payment · Not charged" : order.payment?.provider === "razorpay" ? "Razorpay · Verified" : order.payment?.provider || "Not recorded"}</strong></div></div>
+      <section className="customer-order-items" aria-label="Products in this order">
+        <h3>Products in this order</h3>
+        {order.items.map((item, index) => <article className="customer-order-item" key={`${item.productId}-${item.option ?? "default"}-${index}`}>
+          {item.image ? <img src={item.image} alt={item.name} /> : <span className="customer-order-item-image"><PackageCheck size={19} /></span>}
+          <div className="customer-order-item-info">
+            <strong>{item.name}</strong>
+            <span>{[item.category, item.unit].filter(Boolean).join(" · ") || "Product details"}</span>
+            <span>Quantity: {item.quantity}{item.option ? ` · Size / option: ${item.option}` : ""}</span>
+            <span>Unit price: {formatPrice(item.price)}</span>
+          </div>
+          <strong className="customer-order-item-total">{formatPrice(item.price * item.quantity)}</strong>
+        </article>)}
+      </section>
+      <div className="customer-order-summary">
+        {typeof order.subtotal === "number" && <div><span>Subtotal</span><strong>{formatPrice(order.subtotal)}</strong></div>}
+        {typeof order.discount === "number" && order.discount > 0 && <div><span>Discount</span><strong>−{formatPrice(order.discount)}</strong></div>}
+        <div><span>Order total</span><strong>{formatPrice(order.total)}</strong></div>
+        <div><span>Order status</span><strong className={`order-status status-${order.status}`}>{order.status}</strong></div>
+        <div><span>Payment</span><strong>{order.payment?.provider === "demo" ? `Demo · ${order.payment.method === "cod" ? "Cash on delivery" : "Not charged"}` : order.payment?.provider === "razorpay" ? "Razorpay · Verified" : order.payment?.provider === "cod" ? "Cash on delivery" : order.payment?.provider || "Not recorded"}</strong></div>
+      </div>
       <div className="modal-actions"><button type="button" className="button button-dark" onClick={onClose}>Done</button></div>
     </section>
   </div>;

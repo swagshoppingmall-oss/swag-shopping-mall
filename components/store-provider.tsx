@@ -399,7 +399,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!isCartOptionValid(product, option)) {
         throw new Error(`Choose a valid size for ${product.name}.`);
       }
-      return { productId, name: product.name, price: getProductPrice(product, option), quantity, ...(option ? { option } : {}) };
+      return {
+        productId,
+        name: product.name,
+        price: getProductPrice(product, option),
+        quantity,
+        ...(option ? { option } : {}),
+        category: product.category,
+        unit: product.unit,
+        image: product.image,
+      };
     });
     const quantitiesByProduct = new Map<string, number>();
     items.forEach((item) => quantitiesByProduct.set(item.productId, (quantitiesByProduct.get(item.productId) ?? 0) + item.quantity));

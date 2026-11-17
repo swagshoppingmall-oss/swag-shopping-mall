@@ -34,7 +34,16 @@ export type StoreOrder = {
   id: string;
   userId: string;
   customerEmail?: string;
-  items: Array<{ productId: string; name: string; price: number; quantity: number; option?: string }>;
+  items: Array<{
+    productId: string;
+    name: string;
+    price: number;
+    quantity: number;
+    option?: string;
+    category?: string;
+    unit?: string;
+    image?: string;
+  }>;
   address: DeliveryAddress;
   total: number;
   subtotal?: number;
