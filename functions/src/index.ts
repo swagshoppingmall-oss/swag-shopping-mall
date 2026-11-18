@@ -10,6 +10,12 @@ initializeApp();
 const db = getFirestore();
 const razorpayKeyId = defineSecret("RAZORPAY_KEY_ID");
 const razorpayKeySecret = defineSecret("RAZORPAY_KEY_SECRET");
+const FREE_DELIVERY_THRESHOLD = 99900;
+const DELIVERY_FEE = 7000;
+
+function getDeliveryFee(subtotal: number) {
+  return subtotal >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE;
+}
 
 type CartLine = { productId: string; quantity: number; option?: string };
 type Address = { name: string; phone: string; line1: string; city: string; state: string; pincode: string };
@@ -140,8 +146,8 @@ export const createRazorpayOrder = onCall(
     const items = await getPricedItems(data.items);
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const discount = await getDiscount(data.couponCode, subtotal);
-
-    const total = Math.max(0, subtotal - discount);
+    const deliveryFee = getDeliveryFee(subtotal);
+    const total = Math.max(0, subtotal - discount + deliveryFee);
     if (total < 100) throw new HttpsError("failed-precondition", "Order total must be at least ₹1.");
     const razorpay = new Razorpay({ key_id: razorpayKeyId.value(), key_secret: razorpayKeySecret.value() });
     let paymentOrder;
@@ -161,7 +167,7 @@ export const createRazorpayOrder = onCall(
       userId: request.auth.uid,
       customerEmail: typeof request.auth.token.email === "string" ? request.auth.token.email : null,
       items, address: data.address,
-      subtotal, discount, total, couponCode: data.couponCode ?? null,
+      subtotal, discount, deliveryFee, total, couponCode: data.couponCode ?? null,
       paymentOrderId: paymentOrder.id, status: "pending", createdAt: FieldValue.serverTimestamp(),
     });
     return { orderId: paymentOrder.id, amount: total, currency: "INR", keyId: razorpayKeyId.value() };
@@ -177,7 +183,8 @@ export const createCashOnDeliveryOrder = onCall(async (request) => {
   const items = await getPricedItems(data.items);
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const discount = await getDiscount(data.couponCode, subtotal);
-  const total = Math.max(0, subtotal - discount);
+  const deliveryFee = getDeliveryFee(subtotal);
+  const total = Math.max(0, subtotal - discount + deliveryFee);
   if (total < 1) throw new HttpsError("failed-precondition", "Order total must be at least ₹1.");
 
   const orderRef = db.collection("orders").doc();
@@ -208,6 +215,7 @@ export const createCashOnDeliveryOrder = onCall(async (request) => {
       address: data.address,
       subtotal,
       discount,
+      deliveryFee,
       total,
       couponCode: typeof data.couponCode === "string" ? data.couponCode.trim().toUpperCase() || null : null,
       status: "confirmed",

@@ -48,6 +48,7 @@ export type StoreOrder = {
   total: number;
   subtotal?: number;
   discount?: number;
+  deliveryFee?: number;
   status: string;
   createdAt?: { toDate: () => Date } | Date | string;
   payment?: { paymentId?: string; method?: string; provider?: string };

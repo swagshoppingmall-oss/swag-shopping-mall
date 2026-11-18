@@ -12,6 +12,7 @@ import { DEMO_PRODUCTS } from "@/lib/demo-products";
 import { DEMO_ADMIN, DEMO_CUSTOMER, DEMO_LOGIN_ENABLED } from "@/lib/demo-auth";
 import { cartLineKey, getProductPrice, isCartOptionValid, parseCartLineKey } from "@/lib/cart";
 import type { Product, StoreOrder } from "@/lib/types";
+import { getDeliveryFee } from "@/lib/utils";
 
 type StoreUser = Pick<User, "uid" | "email" | "displayName"> & { isDemo?: boolean };
 const DEFAULT_CATEGORIES = ["Grocery", "Home & Living", "Kitchen", "Fashion"];
@@ -436,7 +437,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       address,
       subtotal,
       discount,
-      total: subtotal - discount,
+      deliveryFee: getDeliveryFee(subtotal),
+      total: subtotal - discount + getDeliveryFee(subtotal),
       status: "confirmed",
       createdAt: new Date(),
       payment: { provider: "demo", method: paymentMethod, paymentId: "DEMO-PAYMENT" },

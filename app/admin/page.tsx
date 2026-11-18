@@ -384,6 +384,7 @@ function CustomerDetailsModal({ order, onClose }: { order: StoreOrder; onClose: 
       <div className="customer-order-summary">
         {typeof order.subtotal === "number" && <div><span>Subtotal</span><strong>{formatPrice(order.subtotal)}</strong></div>}
         {typeof order.discount === "number" && order.discount > 0 && <div><span>Discount</span><strong>−{formatPrice(order.discount)}</strong></div>}
+        {typeof order.deliveryFee === "number" && <div><span>Delivery</span><strong>{order.deliveryFee ? formatPrice(order.deliveryFee) : "Free"}</strong></div>}
         <div><span>Order total</span><strong>{formatPrice(order.total)}</strong></div>
         <div><span>Order status</span><strong className={`order-status status-${order.status}`}>{order.status}</strong></div>
         <div><span>Payment</span><strong>{order.payment?.provider === "demo" ? `Demo · ${order.payment.method === "cod" ? "Cash on delivery" : "Not charged"}` : order.payment?.provider === "razorpay" ? "Razorpay · Verified" : order.payment?.provider === "cod" ? "Cash on delivery" : order.payment?.provider || "Not recorded"}</strong></div>

@@ -10,7 +10,7 @@ import { useStore } from "@/components/store-provider";
 import { getProductPrice, isCartOptionValid, parseCartLineKey } from "@/lib/cart";
 import { db, firebaseConfigured, functions } from "@/lib/firebase";
 import type { DeliveryAddress } from "@/lib/types";
-import { formatPrice } from "@/lib/utils";
+import { formatPrice, getDeliveryFee } from "@/lib/utils";
 
 type RazorpayFailure = { error?: { description?: string } };
 
@@ -49,6 +49,7 @@ export default function CheckoutPage() {
   const subtotal = lines.reduce((total, line) => total + getProductPrice(line.product!, line.option) * line.quantity, 0);
   const demoMode = demoLoginEnabled && user?.isDemo === true;
   const discount = demoMode && offerApplied ? Math.min(Math.floor(subtotal * 0.1), 25000) : 0;
+  const deliveryFee = getDeliveryFee(subtotal);
 
   useEffect(() => {
     let cancelled = false;
@@ -305,7 +306,7 @@ export default function CheckoutPage() {
     : demoMode
       ? paymentMethod === "fail"
         ? <>Simulate payment failure <ArrowRight size={17} /></>
-        : <>Place demo order · {formatPrice(subtotal - discount)} <ArrowRight size={17} /></>
+        : <>Place demo order · {formatPrice(subtotal - discount + deliveryFee)} <ArrowRight size={17} /></>
       : pendingVerification
         ? <>Retry order confirmation <ArrowRight size={17} /></>
         : paymentMethod === "cod"
@@ -334,7 +335,7 @@ export default function CheckoutPage() {
       <button className="button button-dark place-order-button" disabled={busy || addressLoading || savingAddress || invalidOptionLines.length > 0 || (!demoMode && paymentMethod !== "cod" && !scriptReady && !pendingVerification)}>{submitLabel}</button>
       <p className="secure-note"><LockKeyhole size={14} /> {demoMode ? "Demo only · No money will be charged" : paymentMethod === "cod" ? "No payment is taken now · Pay when your order arrives" : "Payments securely processed by Razorpay"}</p>
     </form>
-    <aside className="order-summary checkout-summary"><h2>A little recap</h2><div className="checkout-items">{lines.map(({ product, quantity, option }, index) => <div className="checkout-item" key={`${product!.id}-${option ?? "default"}-${index}`}><img src={product!.image} alt="" /><span><strong>{product!.name}</strong><small>{option ? `Size ${option} · ` : ""}Qty ${quantity} · {product!.unit}</small></span><b>{formatPrice(getProductPrice(product!, option) * quantity)}</b></div>)}</div><div className="summary-row"><span>Subtotal</span><strong>{formatPrice(subtotal)}</strong></div>{discount > 0 && <div className="summary-row demo-discount"><span>WELCOME10 · 10% off</span><strong>−{formatPrice(discount)}</strong></div>}<div className="summary-row"><span>Delivery</span><strong>{subtotal >= 99900 ? "On us" : "At checkout"}</strong></div><div className="summary-row summary-total"><span>{demoMode ? "Demo total" : paymentMethod === "cod" ? "Order total" : "Total before offer"}</span><strong>{formatPrice(subtotal - discount)}</strong></div><p className="summary-note">{demoMode ? "Preview order only. No payment will be processed." : paymentMethod === "cod" ? "Pay the order total in cash when it's delivered." : "Any valid discount will be applied securely before payment."}</p><div className="delivery-estimate"><Truck size={18} /><span><strong>Thoughtful things, on their way</strong><small>Usually delivered in 3–5 business days</small></span></div></aside></div>
+    <aside className="order-summary checkout-summary"><h2>A little recap</h2><div className="checkout-items">{lines.map(({ product, quantity, option }, index) => <div className="checkout-item" key={`${product!.id}-${option ?? "default"}-${index}`}><img src={product!.image} alt="" /><span><strong>{product!.name}</strong><small>{option ? `Size ${option} · ` : ""}Qty ${quantity} · {product!.unit}</small></span><b>{formatPrice(getProductPrice(product!, option) * quantity)}</b></div>)}</div><div className="summary-row"><span>Subtotal</span><strong>{formatPrice(subtotal)}</strong></div>{discount > 0 && <div className="summary-row demo-discount"><span>WELCOME10 · 10% off</span><strong>−{formatPrice(discount)}</strong></div>}<div className="summary-row"><span>Delivery</span><strong>{deliveryFee ? formatPrice(deliveryFee) : "Free"}</strong></div><div className="summary-row summary-total"><span>{demoMode ? "Demo total" : paymentMethod === "cod" ? "Order total" : "Total before offer"}</span><strong>{formatPrice(subtotal - discount + deliveryFee)}</strong></div><p className="summary-note">{demoMode ? "Preview order only. No payment will be processed. Free delivery on orders of ₹999 or more; ₹70 below ₹999." : paymentMethod === "cod" ? "Pay the order total in cash when it's delivered. Free delivery on orders of ₹999 or more; ₹70 below ₹999." : "Free delivery on orders of ₹999 or more; ₹70 delivery charge below ₹999. Any eligible discount is applied at checkout."}</p><div className="delivery-estimate"><Truck size={18} /><span><strong>Thoughtful things, on their way</strong><small>Usually delivered in 3–5 business days</small></span></div></aside></div>
   </div>;
 }
 

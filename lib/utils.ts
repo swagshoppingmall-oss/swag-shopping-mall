@@ -1,3 +1,10 @@
+export const FREE_DELIVERY_THRESHOLD = 99900;
+export const DELIVERY_FEE = 7000;
+
+export function getDeliveryFee(subtotal: number) {
+  return subtotal >= FREE_DELIVERY_THRESHOLD ? 0 : DELIVERY_FEE;
+}
+
 export function formatPrice(paise: number) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency", currency: "INR", maximumFractionDigits: 0,
