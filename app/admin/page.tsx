@@ -10,7 +10,7 @@ import { auth, db, firebaseConfigured, functions } from "@/lib/firebase";
 import type { Product, StoreOrder } from "@/lib/types";
 import { formatPrice } from "@/lib/utils";
 
-const blankProduct: Omit<Product, "id"> = { name: "", category: "Grocery", price: 0, mrp: 0, unit: "", stock: 0, rating: 0, reviews: 0, image: "", images: [], description: "", hasSizeOptions: false, sizeOptions: [], sizePrices: {}, tags: [], active: true };
+const blankProduct: Omit<Product, "id"> = { name: "", category: "Grocery", price: 0, mrp: 0, unit: "", stock: 0, rating: 0, reviews: 0, image: "", images: [], description: "", hasSizeOptions: false, sizeOptions: [], sizePrices: {}, sizeStocks: {}, tags: [], active: true };
 type ProductForm = typeof blankProduct;
 
 function isFashionCategory(category: string) {
@@ -18,13 +18,20 @@ function isFashionCategory(category: string) {
 }
 
 function defaultSizeOptions(category: string) {
-  return /footwear|shoes/i.test(category) ? "6, 7, 8, 9, 10, 11" : "S, M, L, XL, XXL";
+  return /footwear|shoes/i.test(category) ? ["6", "7", "8", "9", "10", "11"] : ["S", "M", "L", "XL", "XXL"];
 }
 
-function initialSizePricing(product: Product | null, category: string) {
-  const options = product?.sizeOptions?.length ? product.sizeOptions : defaultSizeOptions(category).split(",").map((option) => option.trim());
-  if (!product) return options.map((option) => `${option}: `).join("\n");
-  return options.map((option) => `${option}: ${((product.sizePrices?.[option] ?? product.price) / 100).toFixed(2)}`).join("\n");
+type SizeVariantRow = { option: string; price: string; stock: string };
+
+function initialSizeVariants(product: Product | null, category: string): SizeVariantRow[] {
+  const options = product?.sizeOptions?.length ? product.sizeOptions : defaultSizeOptions(category);
+  return options.map((option) => ({
+    option,
+    price: product && (product.sizePrices?.[option] ?? product.price) > 0
+      ? ((product.sizePrices?.[option] ?? product.price) / 100).toFixed(2)
+      : "",
+    stock: Number.isSafeInteger(product?.sizeStocks?.[option]) ? String(product?.sizeStocks?.[option]) : "",
+  }));
 }
 
 export default function AdminPage() {
@@ -100,17 +107,27 @@ export default function AdminPage() {
     const returnDays = Number(form.get("returnDays"));
     const sizePricingText = String(form.get("sizePricing") ?? "");
     const sizePricingRows = hasSizeOptions ? sizePricingText.split("\n").filter((line) => line.trim()).map((line) => {
-      const separator = line.lastIndexOf(":");
-      const option = separator < 1 ? "" : line.slice(0, separator).trim();
-      const rawPrice = separator < 1 ? "" : line.slice(separator + 1).trim();
-      const price = Number(rawPrice);
-      return { option, price, valid: Boolean(option) && Boolean(rawPrice) && Number.isFinite(price) && price > 0 };
+      const [rawOption = "", rawPrice = "", rawStock = "", ...extra] = line.split(":");
+      const option = rawOption.trim();
+      const priceText = rawPrice.trim();
+      const stockText = rawStock.trim();
+      const price = Number(priceText);
+      const stock = stockText ? Number(stockText) : undefined;
+      return {
+        option, price, stock,
+        hasStock: Boolean(stockText),
+        valid: Boolean(option) && Boolean(priceText) && Number.isFinite(price) && price > 0 &&
+          extra.length === 0 && (!stockText || (Number.isSafeInteger(stock) && stock! >= 0)),
+      };
     }) : [];
     const options = sizePricingRows.map((row) => row.option);
+    const hasSizeStock = sizePricingRows.some((row) => row.hasStock);
     if (hasSizeOptions && (!sizePricingRows.length ||
       sizePricingRows.some((row) => !row.valid) ||
-      new Set(options).size !== options.length)) {
-      setError("Enter each size once with a price in rupees, one per line (for example “M: 499”).");
+      new Set(options).size !== options.length ||
+      (hasSizeStock && sizePricingRows.some((row) => !row.hasStock)) ||
+      (!editing && !hasSizeStock))) {
+      setError("Enter each size once as “Size: price: quantity”, one per line (for example “M: 499: 100”).");
       setBusy(false);
       return;
     }
@@ -120,30 +137,25 @@ export default function AdminPage() {
       return;
     }
     const sizePrices = Object.fromEntries(sizePricingRows.map(({ option, price }) => [option, Math.round(price * 100)]));
+    const sizeStocks = hasSizeStock
+      ? Object.fromEntries(sizePricingRows.map(({ option, stock }) => [option, stock!]))
+      : undefined;
     const sellingPrice = Number(form.get("price"));
-    if (!Number.isFinite(sellingPrice) || sellingPrice <= 0) {
+    if (!hasSizeOptions && (!Number.isFinite(sellingPrice) || sellingPrice <= 0)) {
       setError("Enter a selling price greater than zero.");
       setBusy(false);
       return;
     }
-    const sellingPriceCents = Math.round(sellingPrice * 100);
-    if (hasSizeOptions) {
-      const currentStartingPrice = Math.min(...Object.values(sizePrices));
-      const adjustment = sellingPriceCents - currentStartingPrice;
-      for (const [option, price] of Object.entries(sizePrices)) {
-        sizePrices[option] = price + adjustment;
-      }
-      if (Object.values(sizePrices).some((price) => price <= 0)) {
-        setError("The selling price adjustment would make a size price zero or less.");
-        setBusy(false);
-        return;
-      }
-    }
+    const sellingPriceCents = hasSizeOptions
+      ? Math.min(...Object.values(sizePrices))
+      : Math.round(sellingPrice * 100);
     const product: ProductForm = {
       name: String(form.get("name")).trim(), category: String(form.get("category")),
       price: sellingPriceCents,
       mrp: Math.round(Number(form.get("mrp")) * 100),
-      unit: String(form.get("unit")).trim(), stock: Number(form.get("stock")), rating: Number(form.get("rating")),
+      unit: String(form.get("unit")).trim(),
+      stock: sizeStocks ? Object.values(sizeStocks).reduce((total, quantity) => total + quantity, 0) : Number(form.get("stock")),
+      rating: Number(form.get("rating")),
       reviews: editing?.reviews ?? 0,
       image: String(form.get("image")).trim(),
       images: [...new Set(["image", "image2", "image3"].map((field) => String(form.get(field) ?? "").trim()).filter(Boolean))],
@@ -152,6 +164,7 @@ export default function AdminPage() {
       hasSizeOptions,
       sizeOptions: options,
       sizePrices,
+      sizeStocks: sizeStocks ?? {},
       tags: String(form.get("tags")).split(",").map((tag) => tag.trim().toLowerCase()).filter(Boolean), active: true,
       returnAvailable,
       returnDays: returnAvailable ? returnDays : editing?.returnDays ?? 7,
@@ -244,14 +257,45 @@ export default function AdminPage() {
   }
 
   if (!user || !isAdmin) return <div className="shell page-shell"><div className="empty-state"><span className="admin-lock">✳</span><h2>Admin studio.</h2><p>{!user ? "Sign in with an administrator account to manage Swag Shopping Mall." : "This account doesn't have administrator access."}</p><Link href={!user ? "/login" : "/"} className="button button-dark">{!user ? "Sign in" : "Back to shop"}</Link></div></div>;
-  return <div className="admin-shell"><aside className="admin-sidebar"><Link href="/" className="brand"><span className="brand-mark">S</span><span>Swag Shopping Mall</span></Link><span className="admin-eyebrow">ADMIN STUDIO</span>{(["overview", "products", "categories", "orders", "settings"] as const).map((tab) => <button key={tab} className={`admin-nav ${activeTab === tab ? "active" : ""}`} onClick={() => setActiveTab(tab)}>{tab === "overview" ? <BarChart3 size={18} /> : tab === "products" ? <Boxes size={18} /> : tab === "orders" ? <ShoppingBag size={18} /> : tab === "categories" ? <Tags size={18} /> : <Settings size={18} />}{tab[0].toUpperCase() + tab.slice(1)}</button>)}<Link href="/" className="admin-back">← Back to storefront</Link></aside>
+  return <div className="admin-shell"><aside className="admin-sidebar"><Link href="/" className="brand"><span className="brand-mark">S</span><span>Swag Shopping Mall</span></Link><span className="admin-eyebrow">ADMIN STUDIO</span>{(["overview", "products", "categories", "orders", "settings"] as const).map((tab) => <button key={tab} type="button" aria-pressed={activeTab === tab} className={`admin-nav ${activeTab === tab ? "active" : ""}`} onClick={() => setActiveTab(tab)}>{tab === "overview" ? <BarChart3 size={18} /> : tab === "products" ? <Boxes size={18} /> : tab === "orders" ? <ShoppingBag size={18} /> : tab === "categories" ? <Tags size={18} /> : <Settings size={18} />}{tab[0].toUpperCase() + tab.slice(1)}</button>)}<Link href="/" className="admin-back">← Back to storefront</Link></aside>
     <main className="admin-main"><div className="admin-topbar"><div><span className="eyebrow">YOUR SWAG SHOPPING MALL, AT A GLANCE</span><h1>{activeTab === "overview" ? "A good day to grow." : activeTab === "products" ? "Your shelves." : activeTab === "orders" ? "The journey home." : activeTab === "categories" ? "Your collections." : "Store settings."}</h1></div><span className="admin-user"><span className="admin-avatar">{(user.displayName ?? user.email ?? "A")[0].toUpperCase()}</span>{user.displayName ?? user.email}</span></div>
       {demoLoginEnabled && user.isDemo && <div className="demo-catalog-note"><span>✦</span><p><strong>Demo admin workspace.</strong> Changes to products and order statuses are saved only in this browser.</p></div>}
       {error && <p className="form-error admin-error">{error}</p>}
       {activeTab === "overview" && <><div className="metric-grid"><Metric icon={<BarChart3 />} label="Total revenue" value={formatPrice(metrics.revenue)} note="From confirmed orders" /><Metric icon={<ShoppingBag />} label="Orders placed" value={String(metrics.orderCount)} note={`${orders.filter((order) => ["confirmed", "processing"].includes(order.status)).length} need attention`} /><Metric icon={<PackageCheck />} label="Items listed" value={String(products.length)} note={`${products.filter((product) => product.stock < 10).length} running low`} /><Metric icon={<BarChart3 />} label="Sales · last 7 days" value={formatPrice(metrics.weeklyRevenue)} note="Rolling seven-day revenue" /></div>
         <div className="admin-panels"><section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">ON THE MOVE</span><h2>Recent orders</h2></div><button onClick={() => setActiveTab("orders")} className="text-link">See all →</button></div>{orders.slice(0, 5).length ? orders.slice(0, 5).map((order) => <div className="recent-order" key={order.id}><span className="recent-order-icon"><ShoppingBag size={16} /></span><span><strong>{order.address?.name ?? "Customer"}</strong><small>#{order.id.slice(-8).toUpperCase()} · {order.items.length} items</small></span><b>{formatPrice(order.total)}</b><span className={`order-status status-${order.status}`}>{order.status}</span></div>) : <p className="admin-empty">Your first order is just around the corner.</p>}</section><section className="admin-panel"><div className="panel-heading"><div><span className="eyebrow">CUSTOMER FAVOURITES</span><h2>Top-selling products</h2></div></div>{metrics.topProducts.length ? metrics.topProducts.map((item, index) => <div className="top-product" key={item.name}><span className="top-rank">0{index + 1}</span><strong>{item.name}</strong><span>{item.quantity} sold</span></div>) : <p className="admin-empty">The bestsellers will show up after your first sale.</p>}</section></div>
         <section className="admin-panel sales-panel"><div className="panel-heading"><div><span className="eyebrow">A WEEK IN THE MAKING</span><h2>Revenue, day by day</h2></div><strong>{formatPrice(metrics.weeklyRevenue)}</strong></div><div className="sales-chart">{metrics.weeklySales.map((day) => { const peak = Math.max(...metrics.weeklySales.map((item) => item.revenue), 1); return <div className="sales-day" key={day.key}><span>{day.revenue ? formatPrice(day.revenue) : "—"}</span><div className="sales-bar-track"><i style={{ height: `${Math.max(day.revenue ? day.revenue / peak * 100 : 0, 3)}%` }} /></div><small>{day.date.toLocaleDateString("en-IN", { weekday: "short" })}</small></div>; })}</div></section></>}
-      {activeTab === "products" && <section className="admin-panel admin-table-panel"><div className="panel-heading"><div><span className="eyebrow">THE GOOD STUFF</span><h2>{products.length} products on the shelf</h2></div><button className="button button-dark admin-add" onClick={() => { setEditing(null); setAdding(true); }}><Plus size={16} /> Add product</button></div><div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Product</th><th>Category</th><th>Size options</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead><tbody>{products.map((product) => <tr key={product.id}><td><span className="table-product"><img src={product.image} alt="" /><span><strong>{product.name}</strong><small>{product.unit}</small></span></span></td><td>{product.category}</td><td>{product.hasSizeOptions ? <span className="admin-size-options-enabled">Enabled · {product.sizeOptions?.join(", ")}</span> : <span className="admin-size-options-disabled">Disabled</span>}</td><td>{formatPrice(product.price)}</td><td><span className={product.stock < 10 ? "low-stock" : ""}>{product.stock} units</span></td><td><span className="table-actions"><button onClick={() => { setEditing(product); setAdding(true); }} aria-label={`Edit ${product.name}`}><Pencil size={16} /></button><button onClick={() => deleteProduct(product)} aria-label={`Delete ${product.name}`}><Trash2 size={16} /></button></span></td></tr>)}</tbody></table></div></section>}
+      {activeTab === "products" && (
+        <section className="admin-panel admin-table-panel">
+          <div className="panel-heading">
+            <div><span className="eyebrow">THE GOOD STUFF</span><h2>{products.length} products on the shelf</h2></div>
+            <button className="button button-dark admin-add" onClick={() => { setEditing(null); setAdding(true); }}><Plus size={16} /> Add product</button>
+          </div>
+          <div className="admin-table-wrap">
+            <table className="admin-table">
+              <thead><tr><th>Product</th><th>Category</th><th>Size options</th><th>Price</th><th>Stock</th><th>Actions</th></tr></thead>
+              <tbody>{products.map((product) => (
+                <tr key={product.id}>
+                  <td><span className="table-product"><img src={product.image} alt="" /><span><strong>{product.name}</strong><small>{product.unit}</small></span></span></td>
+                  <td>{product.category}</td>
+                  <td className="admin-size-options-cell">
+                    {product.hasSizeOptions ? (
+                      <div className="admin-size-options" role="group" aria-label={`Size options: ${product.sizeOptions?.join(", ") ?? ""}`}>
+                        <span className="admin-size-options-enabled">Enabled</span>
+                        <span className="admin-size-option-list" role="list">
+                          {product.sizeOptions?.map((option) => <span className="admin-size-option" role="listitem" key={option}>{option}</span>)}
+                        </span>
+                      </div>
+                    ) : <span className="admin-size-options-disabled">Disabled</span>}
+                  </td>
+                  <td>{formatPrice(product.price)}</td>
+                  <td><span className={product.stock < 10 ? "low-stock" : ""}>{product.stock} units</span></td>
+                  <td><span className="table-actions"><button onClick={() => { setEditing(product); setAdding(true); }} aria-label={`Edit ${product.name}`}><Pencil size={16} /></button><button onClick={() => deleteProduct(product)} aria-label={`Delete ${product.name}`}><Trash2 size={16} /></button></span></td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </section>
+      )}
       {activeTab === "categories" && <section className="admin-panel">
         <div className="panel-heading"><div><span className="eyebrow">ORGANIZE THE SHOP</span><h2>Product categories</h2></div></div>
         <form className="category-admin-form" onSubmit={submitCategory}>
@@ -304,43 +348,92 @@ function ProductModal({ product, categories, busy, onClose, onSubmit }: { produc
   const initialCategory = product?.category ?? categories[0] ?? "Grocery";
   const [category, setCategory] = useState(initialCategory);
   const [hasSizeOptions, setHasSizeOptions] = useState(product?.hasSizeOptions ?? isFashionCategory(initialCategory));
-  const [sizePricing, setSizePricing] = useState(initialSizePricing(product, initialCategory));
-  const [sellingPrice, setSellingPrice] = useState(product ? (product.price / 100).toFixed(2) : "");
+  const [sizeVariants, setSizeVariants] = useState(() => initialSizeVariants(product, initialCategory));
   const [returnAvailable, setReturnAvailable] = useState(product?.returnAvailable !== false);
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><form className="product-modal" onSubmit={onSubmit}><div className="modal-heading"><div><span className="eyebrow">THE SWAG SHOPPING MALL SHELF</span><h2>{product ? "A little update." : "Something good."}</h2></div><button type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="form-grid">
-    <label className="field-wide">Product name<input name="name" required defaultValue={product?.name ?? ""} /></label>
-    <label>Category<select name="category" value={category} onChange={(event) => {
-      const nextCategory = event.target.value;
-      setCategory(nextCategory);
-      if (!product && isFashionCategory(nextCategory)) setHasSizeOptions(true);
-      if (!product) setSizePricing(initialSizePricing(null, nextCategory));
-    }} required>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
-    <label>Pack / unit<input name="unit" required placeholder="e.g. 1 kg" defaultValue={product?.unit ?? ""} /></label>
-    <label>Selling price (₹)<input name="price" type="number" min="0.01" step="0.01" required value={sellingPrice} onChange={(event) => setSellingPrice(event.target.value)} /></label>
-    {hasSizeOptions && <p className="field-wide size-price-note">This is the starting price. Changing it adjusts every size price by the same amount; you can also edit each size below.</p>}
-    <label>Original price (₹)<input name="mrp" type="number" min="1" step="0.01" required defaultValue={product ? product.mrp / 100 : ""} /></label>
-    <label>Stock quantity<input name="stock" type="number" min="0" required defaultValue={product?.stock ?? 0} /></label>
-    <label>Rating (0–5)<input name="rating" type="number" min="0" max="5" step="0.1" required defaultValue={product?.rating ?? 0} /></label>
-    <div className="field-wide admin-product-images">
-      <div><strong>Product images</strong><small>Add up to 3 image URLs. The first image appears in the catalog; customers can switch views on the product page.</small></div>
-      <label>Main image URL<input name="image" type="url" required placeholder="https://..." defaultValue={product?.images?.[0] ?? product?.image ?? ""} /></label>
-      <label>Second image URL <span>Optional</span><input name="image2" type="url" placeholder="https://..." defaultValue={product?.images?.[1] ?? ""} /></label>
-      <label>Third image URL <span>Optional</span><input name="image3" type="url" placeholder="https://..." defaultValue={product?.images?.[2] ?? ""} /></label>
-    </div>
-    <label className="field-wide">Description<textarea name="description" rows={3} required defaultValue={product?.description ?? ""} /></label>
-    <label className="field-wide size-options-toggle">
-      <input type="checkbox" name="hasSizeOptions" value="true" checked={hasSizeOptions} onChange={(event) => setHasSizeOptions(event.target.checked)} />
-      <span><strong>Customers must choose a size</strong><small>Enable for apparel, footwear, or any product with options.</small></span>
-    </label>
-    {hasSizeOptions && <label className="field-wide">Size and price (₹)<textarea name="sizePricing" rows={5} required value={sizePricing} onChange={(event) => setSizePricing(event.target.value)} placeholder={/footwear|shoes/i.test(category) ? "6: 699\n7: 699\n8: 749" : "S: 499\nM: 499\nL: 549\nXL: 599"} /><small>One option per line as “Size: price”. Prices are entered in rupees. Example: XL: 599.</small></label>}
-    <label className="field-wide size-options-toggle">
-      <input type="checkbox" name="returnAvailable" value="true" checked={returnAvailable} onChange={(event) => setReturnAvailable(event.target.checked)} />
-      <span><strong>Returns available</strong><small>Let customers return this product within a set number of days.</small></span>
-    </label>
-    {returnAvailable && <label>Return window (days)<input name="returnDays" type="number" min="1" step="1" required defaultValue={product?.returnDays ?? 7} /></label>}
-    <label className="field-wide">Product specifications<textarea name="specifications" rows={4} placeholder={"Material: 100% cotton\nCare: Machine washable"} defaultValue={Object.entries(product?.specifications ?? {}).map(([label, value]) => `${label}: ${value}`).join("\n")} /><small>One specification per line, in “Label: value” format.</small></label>
-    <label className="field-wide">Tags, comma separated<input name="tags" placeholder="popular, organic" defaultValue={product?.tags?.join(", ") ?? ""} /></label>
-  </div><div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-dark" disabled={busy}>{busy ? "Saving..." : product ? "Save changes" : "Add to shelf"}</button></div></form></div>;
+  const sizePricingValue = sizeVariants.map(({ option, price, stock }) => `${option}: ${price}: ${stock}`).join("\n");
+  const lowestVariantPrice = sizeVariants.reduce((lowest, row) => {
+    const price = Number(row.price);
+    return Number.isFinite(price) && price > 0 ? Math.min(lowest, price) : lowest;
+  }, Number.POSITIVE_INFINITY);
+  const variantStockTotal = sizeVariants.reduce((total, row) => total + (row.stock === "" ? 0 : Number(row.stock) || 0), 0);
+  const allVariantStocksEntered = sizeVariants.length > 0 && sizeVariants.every((row) => row.stock !== "");
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <form className="product-modal" onSubmit={onSubmit}>
+      <div className="modal-heading"><div><span className="eyebrow">PRODUCT CATALOG</span><h2>{product ? "Update product" : "Add a product"}</h2><p>Enter the product details below. Fields marked required must be filled in.</p></div><button type="button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
+      <div className="product-form-content">
+        <section className="product-form-section">
+          <div className="product-form-section-heading"><span>1</span><div><h3>Product details</h3><p>What are you selling?</p></div></div>
+          <div className="form-grid">
+            <label className="field-wide"><span className="product-field-label">Product name <span className="required-mark">Required</span></span><input name="name" required placeholder="e.g. Cotton T-shirt" defaultValue={product?.name ?? ""} /></label>
+            <label><span className="product-field-label">Category <span className="required-mark">Required</span></span><select name="category" value={category} onChange={(event) => {
+              const nextCategory = event.target.value;
+              setCategory(nextCategory);
+              if (!product && isFashionCategory(nextCategory)) setHasSizeOptions(true);
+              if (!product) setSizeVariants(initialSizeVariants(null, nextCategory));
+            }} required>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
+            <label><span className="product-field-label">Pack / unit <span className="required-mark">Required</span></span><input name="unit" required placeholder="e.g. 1 kg or 1 piece" defaultValue={product?.unit ?? ""} /></label>
+            <label className="field-wide">Description <span className="required-mark">Required</span><textarea name="description" rows={3} required placeholder="Describe the product, its material, fit, or key benefits." defaultValue={product?.description ?? ""} /></label>
+          </div>
+        </section>
+
+        <section className="product-form-section">
+          <div className="product-form-section-heading"><span>2</span><div><h3>Price and inventory</h3><p>Set the selling price and how many pieces are available.</p></div></div>
+          <div className="form-grid">
+            {hasSizeOptions
+              ? <div className="field-wide product-starting-price"><span>Starting price</span><strong>{Number.isFinite(lowestVariantPrice) ? formatPrice(Math.round(lowestVariantPrice * 100)) : "Add variant prices below"}</strong><small>Customers see the lowest size price as the starting price.</small><input type="hidden" name="price" value={Number.isFinite(lowestVariantPrice) ? lowestVariantPrice : 0} /></div>
+              : <label><span className="product-field-label">Selling price (₹) <span className="required-mark">Required</span></span><input name="price" type="number" min="0.01" step="0.01" required defaultValue={product ? (product.price / 100).toFixed(2) : ""} placeholder="e.g. 499" /></label>}
+            <label><span className="product-field-label">Original price (₹) <span className="required-mark">Required</span></span><input name="mrp" type="number" min="1" step="0.01" required defaultValue={product ? product.mrp / 100 : ""} placeholder="e.g. 699" /></label>
+            <label><span className="product-field-label">{hasSizeOptions ? "Total stock" : "Stock quantity"} <span className="required-mark">Required</span></span>{hasSizeOptions ? <input name="stock" type="number" min="0" required readOnly value={allVariantStocksEntered ? variantStockTotal : product?.stock ?? 0} /> : <input name="stock" type="number" min="0" required defaultValue={product?.stock ?? 0} />}<small>{hasSizeOptions ? "Automatically calculated from the variant quantities below." : "Total pieces currently available."}</small></label>
+            <label>Rating (0–5)<input name="rating" type="number" min="0" max="5" step="0.1" defaultValue={product?.rating ?? 0} /><small>Optional. Leave at 0 for a new product.</small></label>
+          </div>
+        </section>
+
+        <section className="product-form-section">
+          <div className="product-form-section-heading"><span>3</span><div><h3>Product photos</h3><p>Add one main photo, with up to two extra views.</p></div></div>
+          <div className="admin-product-images">
+            <label><span className="product-field-label">Main image URL <span className="required-mark">Required</span></span><input name="image" type="url" required placeholder="https://..." defaultValue={product?.images?.[0] ?? product?.image ?? ""} /></label>
+            <label>Second image URL <span>Optional</span><input name="image2" type="url" placeholder="https://..." defaultValue={product?.images?.[1] ?? ""} /></label>
+            <label>Third image URL <span>Optional</span><input name="image3" type="url" placeholder="https://..." defaultValue={product?.images?.[2] ?? ""} /></label>
+          </div>
+        </section>
+
+        <section className="product-form-section">
+          <div className="product-form-section-heading"><span>4</span><div><h3>Sizes and variants</h3><p>Only switch this on if customers need to choose a size or option.</p></div></div>
+          <label className="field-wide size-options-toggle">
+            <input type="checkbox" name="hasSizeOptions" value="true" checked={hasSizeOptions} onChange={(event) => setHasSizeOptions(event.target.checked)} />
+            <span><strong>Customers choose a size or option</strong><small>Use for apparel, footwear, or products with different variants.</small></span>
+          </label>
+          {hasSizeOptions && <div className="field-wide variant-editor">
+            <div className="variant-editor-heading"><strong>Variant list</strong><span>Set the size, price and available quantity for each row.</span></div>
+            <div className="variant-table-head"><span>Size / option</span><span>Price (₹)</span><span>Quantity</span><span aria-hidden="true" /></div>
+            {sizeVariants.map((row, index) => <div className="variant-row" key={`variant-${index}`}>
+              <label><span className="visually-hidden">Size or option {index + 1}</span><input aria-label={`Size or option ${index + 1}`} value={row.option} onChange={(event) => setSizeVariants((current) => current.map((item, rowIndex) => rowIndex === index ? { ...item, option: event.target.value } : item))} placeholder="e.g. S" /></label>
+              <label><span className="visually-hidden">Price in rupees for {row.option || `option ${index + 1}`}</span><input aria-label={`Price in rupees for ${row.option || `option ${index + 1}`}`} type="number" min="0.01" step="0.01" value={row.price} onChange={(event) => setSizeVariants((current) => current.map((item, rowIndex) => rowIndex === index ? { ...item, price: event.target.value } : item))} placeholder="e.g. 300" /></label>
+              <label><span className="visually-hidden">Available quantity for {row.option || `option ${index + 1}`}</span><input aria-label={`Available quantity for ${row.option || `option ${index + 1}`}`} type="number" min="0" step="1" value={row.stock} onChange={(event) => setSizeVariants((current) => current.map((item, rowIndex) => rowIndex === index ? { ...item, stock: event.target.value } : item))} placeholder="e.g. 100" /></label>
+              <button type="button" className="variant-remove" aria-label={`Remove ${row.option || `option ${index + 1}`}`} disabled={sizeVariants.length < 2} onClick={() => setSizeVariants((current) => current.filter((_, rowIndex) => rowIndex !== index))}><X size={16} /></button>
+            </div>)}
+            <input type="hidden" name="sizePricing" value={sizePricingValue} />
+            <div className="variant-editor-footer"><button type="button" className="variant-add" onClick={() => setSizeVariants((current) => [...current, { option: "", price: "", stock: "" }])}><Plus size={15} /> Add size / option</button><span>{allVariantStocksEntered ? `${variantStockTotal} total pieces` : product ? "Per-size quantities incomplete" : "Enter a quantity for every size"}</span></div>
+            <p className="variant-help">Fill in all three fields for every row. Example: <strong>S</strong> · <strong>300</strong> · <strong>100</strong> means size S costs ₹300 and has 100 pieces.</p>
+          </div>}
+        </section>
+
+        <section className="product-form-section">
+          <div className="product-form-section-heading"><span>5</span><div><h3>Returns and extra details</h3><p>Optional information to help customers decide.</p></div></div>
+          <div className="form-grid">
+            <label className="field-wide size-options-toggle">
+              <input type="checkbox" name="returnAvailable" value="true" checked={returnAvailable} onChange={(event) => setReturnAvailable(event.target.checked)} />
+              <span><strong>Returns available</strong><small>Allow customers to return this product within a set number of days.</small></span>
+            </label>
+            {returnAvailable && <label>Return window (days)<input name="returnDays" type="number" min="1" step="1" required defaultValue={product?.returnDays ?? 7} /></label>}
+            <label className="field-wide">Product specifications<textarea name="specifications" rows={3} placeholder={"Material: 100% cotton\nCare: Machine washable"} defaultValue={Object.entries(product?.specifications ?? {}).map(([label, value]) => `${label}: ${value}`).join("\n")} /><small>Optional. One detail per line, like “Material: 100% cotton”.</small></label>
+            <label className="field-wide">Tags<input name="tags" placeholder="e.g. popular, organic (separate with commas)" defaultValue={product?.tags?.join(", ") ?? ""} /><small>Optional. Helps organize and feature products.</small></label>
+          </div>
+        </section>
+      </div>
+      <div className="modal-actions"><button type="button" className="button button-outline" onClick={onClose}>Cancel</button><button className="button button-dark" disabled={busy}>{busy ? "Saving product..." : product ? "Save product" : "Add product"}</button></div>
+    </form>
+  </div>;
 }
 
 function CustomerDetailsModal({ order, onClose }: { order: StoreOrder; onClose: () => void }) {

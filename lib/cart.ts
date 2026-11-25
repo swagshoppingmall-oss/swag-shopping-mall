@@ -48,6 +48,12 @@ export function getProductPrice(product: { price: number; sizePrices?: Record<st
     : product.price;
 }
 
+export function getProductStock(product: { stock: number; sizeStocks?: Record<string, number> }, option?: string) {
+  if (!option || !product.sizeStocks || !Object.keys(product.sizeStocks).length) return product.stock;
+  const optionStock = product.sizeStocks[option];
+  return Number.isSafeInteger(optionStock) && optionStock >= 0 ? optionStock : 0;
+}
+
 export function getStartingPrice(product: { price: number; category?: string; hasSizeOptions?: boolean; sizeOptions?: string[]; sizePrices?: Record<string, number> }) {
   if (!hasProductOptions(product)) return product.price;
   const options = getProductOptions(product);

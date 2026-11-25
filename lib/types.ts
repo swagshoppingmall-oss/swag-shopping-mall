@@ -15,6 +15,7 @@ export type Product = {
   hasSizeOptions?: boolean;
   sizeOptions?: string[];
   sizePrices?: Record<string, number>;
+  sizeStocks?: Record<string, number>;
   tags?: string[];
   active?: boolean;
   returnAvailable?: boolean;

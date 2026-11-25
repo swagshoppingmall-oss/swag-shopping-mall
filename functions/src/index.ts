@@ -76,6 +76,39 @@ function getOptionPrice(product: FirebaseFirestore.DocumentData, option?: string
   return product.price as number;
 }
 
+function getOptionStock(product: FirebaseFirestore.DocumentData, option?: string) {
+  if (!option || !product.sizeStocks || typeof product.sizeStocks !== "object" || !Object.keys(product.sizeStocks).length) {
+    return product.stock as number;
+  }
+  const optionStock = product.sizeStocks[option];
+  return Number.isSafeInteger(optionStock) && optionStock >= 0 ? optionStock as number : 0;
+}
+
+function getStockUpdate(product: FirebaseFirestore.DocumentData, items: Array<{ option?: string; quantity: number }>) {
+  const quantity = items.reduce((total, item) => total + item.quantity, 0);
+  const sizeStocks = product.sizeStocks && typeof product.sizeStocks === "object" ? { ...product.sizeStocks } : undefined;
+  if (sizeStocks) items.forEach((item) => {
+    if (item.option && Number.isSafeInteger(sizeStocks[item.option])) {
+      sizeStocks[item.option] = Math.max(0, sizeStocks[item.option] - item.quantity);
+    }
+  });
+  return { stock: (product.stock as number) - quantity, ...(sizeStocks ? { sizeStocks } : {}) };
+}
+
+function hasItemsAvailable(product: FirebaseFirestore.DocumentData, items: Array<{ option?: string; quantity: number; price: number }>) {
+  const totalQuantity = items.reduce((total, item) => total + item.quantity, 0);
+  if (!Number.isInteger(product.stock) || product.stock < totalQuantity) return false;
+  const quantitiesByOption = new Map<string, number>();
+  for (const item of items) {
+    if (!hasValidOption(product, item.option) || getOptionPrice(product, item.option) !== item.price) return false;
+    const optionKey = item.option ?? "";
+    const quantity = (quantitiesByOption.get(optionKey) ?? 0) + item.quantity;
+    if (getOptionStock(product, item.option) < quantity) return false;
+    quantitiesByOption.set(optionKey, quantity);
+  }
+  return true;
+}
+
 async function getPricedItems(lines: CartLine[]) {
   const pricedProducts = await Promise.all(lines.map(async (line) => {
     const snap = await db.collection("products").doc(line.productId).get();
@@ -89,6 +122,9 @@ async function getPricedItems(lines: CartLine[]) {
     }
     if (!hasValidOption(product, line.option)) {
       throw new HttpsError("failed-precondition", `Choose an available size for ${product.name ?? "this product"}.`);
+    }
+    if (getOptionStock(product, line.option) < line.quantity) {
+      throw new HttpsError("failed-precondition", `${product.name ?? "A product"} does not have enough stock in size ${line.option}.`);
     }
     const price = getOptionPrice(product, line.option);
     if (!Number.isSafeInteger(price) || price < 1) {
@@ -106,6 +142,7 @@ async function getPricedItems(lines: CartLine[]) {
         ...(typeof product.image === "string" ? { image: product.image } : {}),
       },
       stock: product.stock as number,
+      optionStock: getOptionStock(product, line.option),
     };
   }));
   const quantitiesByProduct = new Map<string, number>();
@@ -113,6 +150,15 @@ async function getPricedItems(lines: CartLine[]) {
     const quantity = (quantitiesByProduct.get(item.productId) ?? 0) + item.quantity;
     if (quantity > stock) throw new HttpsError("failed-precondition", `${item.name} does not have enough stock.`);
     quantitiesByProduct.set(item.productId, quantity);
+  });
+  const quantitiesByOption = new Map<string, number>();
+  pricedProducts.forEach(({ item, optionStock }) => {
+    const key = `${item.productId}\u0000${item.option ?? ""}`;
+    const quantity = (quantitiesByOption.get(key) ?? 0) + item.quantity;
+    if (quantity > optionStock) {
+      throw new HttpsError("failed-precondition", `${item.name} does not have enough stock${item.option ? ` in size ${item.option}` : ""}.`);
+    }
+    quantitiesByOption.set(key, quantity);
   });
   return pricedProducts.map(({ item }) => item);
 }
@@ -202,8 +248,8 @@ export const createCashOnDeliveryOrder = onCall(async (request) => {
       const product = snap.data();
       const productId = productRefs[index].id;
       const item = items.find((candidate) => candidate.productId === productId);
-      if (!snap.exists || !product || product.active === false || !Number.isInteger(product.stock) ||
-        product.stock < quantitiesByProduct.get(productId)! || !items.filter((candidate) => candidate.productId === productId).every((candidate) => hasValidOption(product, candidate.option) && getOptionPrice(product, candidate.option) === candidate.price)) {
+      const productItems = items.filter((candidate) => candidate.productId === productId);
+      if (!snap.exists || !product || product.active === false || !hasItemsAvailable(product, productItems)) {
         throw new HttpsError("failed-precondition", `${item?.name ?? "A product"} is no longer available at the requested price and quantity.`);
       }
     });
@@ -224,7 +270,10 @@ export const createCashOnDeliveryOrder = onCall(async (request) => {
       updatedAt: FieldValue.serverTimestamp(),
     });
     productSnaps.forEach((snap, index) => {
-      transaction.update(productRefs[index], { stock: snap.data()!.stock - quantitiesByProduct.get(productRefs[index].id)! });
+      transaction.update(productRefs[index], getStockUpdate(
+        snap.data()!,
+        items.filter((item) => item.productId === productRefs[index].id),
+      ));
     });
   });
   return { orderId: orderRef.id };
@@ -272,11 +321,8 @@ export const verifyRazorpayPayment = onCall(
         const productId = uniqueProductRefs[index].id;
         const item = draft.items.find((candidate: { productId: string }) => candidate.productId === productId);
         const product = snap.data();
-        const stock = snap.data()?.stock;
-        if (!snap.exists || !product || product.active === false || !Number.isInteger(stock) ||
-          stock < quantitiesByProduct.get(productId)! ||
-          !draft.items.filter((candidate: { productId: string }) => candidate.productId === productId)
-            .every((candidate: { option?: string; price: number }) => hasValidOption(product, candidate.option) && getOptionPrice(product, candidate.option) === candidate.price)) {
+        const productItems = draft.items.filter((candidate: { productId: string }) => candidate.productId === productId);
+        if (!snap.exists || !product || product.active === false || !hasItemsAvailable(product, productItems)) {
           throw new HttpsError("failed-precondition", `${item?.name ?? "A product"} is no longer available in the requested quantity.`);
         }
       });
@@ -289,7 +335,10 @@ export const verifyRazorpayPayment = onCall(
       };
       transaction.create(orderRef, order);
       productSnaps.forEach((snap, index) => {
-        transaction.update(uniqueProductRefs[index], { stock: snap.data()!.stock - quantitiesByProduct.get(uniqueProductRefs[index].id)! });
+        transaction.update(uniqueProductRefs[index], getStockUpdate(
+          snap.data()!,
+          draft.items.filter((item: { productId: string }) => item.productId === uniqueProductRefs[index].id),
+        ));
       });
       transaction.create(db.collection("transactions").doc(paymentId), {
         userId: request.auth!.uid, orderId: paymentOrderId, paymentId, amount: draft.total,

@@ -10,7 +10,7 @@ import { auth, db, firebaseConfigured } from "@/lib/firebase";
 import { ADMIN_EMAIL } from "@/lib/admin";
 import { DEMO_PRODUCTS } from "@/lib/demo-products";
 import { DEMO_ADMIN, DEMO_CUSTOMER, DEMO_LOGIN_ENABLED } from "@/lib/demo-auth";
-import { cartLineKey, getProductPrice, isCartOptionValid, parseCartLineKey } from "@/lib/cart";
+import { cartLineKey, getProductPrice, getProductStock, isCartOptionValid, parseCartLineKey } from "@/lib/cart";
 import type { Product, StoreOrder } from "@/lib/types";
 import { getDeliveryFee } from "@/lib/utils";
 
@@ -247,7 +247,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const otherOptionsQuantity = Object.entries(previous).reduce((total, [lineKey, quantity]) => {
         return parseCartLineKey(lineKey).productId === id && lineKey !== key ? total + quantity : total;
       }, 0);
-      return { ...previous, [key]: Math.min(current + amount, Math.max(0, product.stock - otherOptionsQuantity), 99) };
+      const hasOptionStock = Boolean(option && product.sizeStocks && Object.keys(product.sizeStocks).length);
+      const available = hasOptionStock ? getProductStock(product, option) : product.stock - otherOptionsQuantity;
+      return { ...previous, [key]: Math.min(current + amount, Math.max(0, available), 99) };
     });
   }, [products]);
   const setQuantity = useCallback((id: string, quantity: number) => {
@@ -263,7 +265,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const otherOptionsQuantity = Object.entries(previous).reduce((total, [lineKey, lineQuantity]) => {
         return parseCartLineKey(lineKey).productId === productId && lineKey !== id ? total + lineQuantity : total;
       }, 0);
-      return { ...previous, [id]: Math.min(quantity, Math.max(0, product.stock - otherOptionsQuantity), 99) };
+      const hasOptionStock = Boolean(option && product.sizeStocks && Object.keys(product.sizeStocks).length);
+      const available = hasOptionStock ? getProductStock(product, option) : product.stock - otherOptionsQuantity;
+      return { ...previous, [id]: Math.min(quantity, Math.max(0, available), 99) };
     });
   }, [products]);
   const removeFromCart = useCallback((id: string) => {
@@ -400,6 +404,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (!isCartOptionValid(product, option)) {
         throw new Error(`Choose a valid size for ${product.name}.`);
       }
+      if (getProductStock(product, option) < quantity) {
+        throw new Error(`${product.name} does not have enough stock${option ? ` in size ${option}` : ""}.`);
+      }
       return {
         productId,
         name: product.name,
@@ -445,7 +452,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     setProducts((previous) => previous.map((product) => {
       const quantity = quantitiesByProduct.get(product.id);
-      return quantity ? { ...product, stock: Math.max(0, product.stock - quantity) } : product;
+      if (!quantity) return product;
+      const optionQuantities = new Map<string, number>();
+      items.filter((item) => item.productId === product.id && item.option).forEach((item) => {
+        optionQuantities.set(item.option!, (optionQuantities.get(item.option!) ?? 0) + item.quantity);
+      });
+      const sizeStocks = product.sizeStocks ? { ...product.sizeStocks } : undefined;
+      if (sizeStocks) optionQuantities.forEach((amount, option) => {
+        if (Number.isSafeInteger(sizeStocks[option])) sizeStocks[option] = Math.max(0, sizeStocks[option] - amount);
+      });
+      return { ...product, stock: Math.max(0, product.stock - quantity), ...(sizeStocks ? { sizeStocks } : {}) };
     }));
     setOrders((previous) => {
       return [order, ...previous];
@@ -523,10 +539,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     if (status === "cancelled" && existing.status !== "cancelled") {
       setProducts((previous) => previous.map((product) => {
-        const returnedQuantity = existing.items
+        const returnedItems = existing.items
           .filter((item) => item.productId === product.id)
-          .reduce((total, item) => total + item.quantity, 0);
-        return returnedQuantity ? { ...product, stock: product.stock + returnedQuantity } : product;
+        const returnedQuantity = returnedItems.reduce((total, item) => total + item.quantity, 0);
+        if (!returnedQuantity) return product;
+        const sizeStocks = product.sizeStocks ? { ...product.sizeStocks } : undefined;
+        if (sizeStocks) returnedItems.forEach((item) => {
+          if (item.option && Number.isSafeInteger(sizeStocks[item.option])) {
+            sizeStocks[item.option] += item.quantity;
+          }
+        });
+        return { ...product, stock: product.stock + returnedQuantity, ...(sizeStocks ? { sizeStocks } : {}) };
       }));
     }
     setOrders((previous) => previous.map((order) => order.id === orderId ? { ...order, status } : order));
